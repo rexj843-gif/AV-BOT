@@ -1,5 +1,10 @@
 require('dotenv').config();
 
+// Debug: Log what environment variables are loaded
+console.log('[ENV] process.env.TOKEN exists:', !!process.env.TOKEN);
+console.log('[ENV] process.env.DISCORD_TOKEN exists:', !!process.env.DISCORD_TOKEN);
+console.log('[ENV] All env keys count:', Object.keys(process.env).length);
+
 const {
   Client,
   GatewayIntentBits,
@@ -1590,12 +1595,32 @@ client.on('messageCreate', async message => {
 });
 
 const DISCORD_TOKEN = (process.env.DISCORD_TOKEN || process.env.TOKEN)?.trim();
+
+console.log('[TOKEN CHECK]');
+console.log('  DISCORD_TOKEN from env:', !!process.env.DISCORD_TOKEN);
+console.log('  TOKEN from env:', !!process.env.TOKEN);
+console.log('  Selected token length:', DISCORD_TOKEN?.length || 0);
+
 if (!DISCORD_TOKEN) {
-  console.error('Discord bot token missing. Set TOKEN in .env locally and in Railway environment variables.');
+  console.error('\n❌ FATAL ERROR: Discord bot token is missing!\n');
+  console.error('To fix this issue:');
+  console.error('1. Local: Add TOKEN=your_token_here to your .env file');
+  console.error('2. Railway: Set TOKEN environment variable in Railway dashboard');
+  console.error('3. Get your token: https://discord.com/developers/applications');
+  console.error('\nEnvironment variables available:', Object.keys(process.env).filter(k => !k.startsWith('npm_')).length);
   process.exit(1);
 }
 
+if (typeof DISCORD_TOKEN !== 'string' || DISCORD_TOKEN.length < 50) {
+  console.error('\n❌ FATAL ERROR: Invalid Discord token format!\n');
+  console.error('Token must be a string with at least 50 characters');
+  console.error('Got token of type:', typeof DISCORD_TOKEN, 'length:', DISCORD_TOKEN.length);
+  process.exit(1);
+}
+
+console.log('✅ Token validation passed. Connecting to Discord...\n');
+
 client.login(DISCORD_TOKEN).catch((error) => {
-  console.error('Discord login failed:', error);
+  console.error('❌ Discord login failed:', error.message);
   process.exit(1);
 });
