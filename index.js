@@ -1603,11 +1603,10 @@ console.log('  Selected token length:', DISCORD_TOKEN?.length || 0);
 
 if (!DISCORD_TOKEN) {
   console.error('\n❌ FATAL ERROR: Discord bot token is missing!\n');
-  console.error('To fix this issue:');
-  console.error('1. Local: Add TOKEN=your_token_here to your .env file');
-  console.error('2. Railway: Set TOKEN environment variable in Railway dashboard');
-  console.error('3. Get your token: https://discord.com/developers/applications');
-  console.error('\nEnvironment variables available:', Object.keys(process.env).filter(k => !k.startsWith('npm_')).length);
+  console.error('RAILWAY USERS: Go to your Railway service → Variables → Add TOKEN environment variable');
+  console.error('LOCAL USERS: Add TOKEN=your_token_here to your .env file');
+  console.error('Get your token: https://discord.com/developers/applications\n');
+  console.error('Environment variables currently loaded:', Object.keys(process.env).filter(k => !k.startsWith('npm_')).length);
   process.exit(1);
 }
 
@@ -1621,6 +1620,14 @@ if (typeof DISCORD_TOKEN !== 'string' || DISCORD_TOKEN.length < 50) {
 console.log('✅ Token validation passed. Connecting to Discord...\n');
 
 client.login(DISCORD_TOKEN).catch((error) => {
-  console.error('❌ Discord login failed:', error.message);
+  console.error('\n❌ Discord login failed:', error.message);
+  if (error.code === 'TokenInvalid') {
+    console.error('\nToken is invalid. Possible causes:');
+    console.error('  - Token was regenerated or revoked');
+    console.error('  - Token has changed since last deployment');
+    console.error('  - Token is expired or malformed');
+    console.error('\nSolution: Get a fresh token from https://discord.com/developers/applications');
+    console.error('Then update your Railway variables or .env file and redeploy.\n');
+  }
   process.exit(1);
 });
