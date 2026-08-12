@@ -1620,11 +1620,39 @@ console.log('  TOKEN from env:', !!process.env.TOKEN);
 console.log('  Selected token length:', DISCORD_TOKEN?.length || 0);
 
 if (!DISCORD_TOKEN) {
-  console.error('\n❌ FATAL ERROR: Discord bot token is missing!\n');
-  console.error('RAILWAY USERS: Go to your Railway service → Variables → Add TOKEN environment variable');
-  console.error('LOCAL USERS: Add TOKEN=your_token_here to your .env file');
-  console.error('Get your token: https://discord.com/developers/applications\n');
-  console.error('Environment variables currently loaded:', Object.keys(process.env).filter(k => !k.startsWith('npm_')).length);
+  const isRailway = process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_SERVICE_NAME;
+  console.error('\n' + '='.repeat(80));
+  console.error('❌ FATAL ERROR: Discord bot TOKEN is not configured!');
+  console.error('='.repeat(80));
+  
+  if (isRailway) {
+    console.error('\n🚀 YOU ARE ON RAILWAY - ACTION REQUIRED:\n');
+    console.error('OPTION 1: Railway Dashboard (Easiest)');
+    console.error('  1. Go to: https://railway.app');
+    console.error('  2. Select your Avengers project');
+    console.error('  3. Click the av-bot service');
+    console.error('  4. Click the "Variables" tab');
+    console.error('  5. Click "+ Add Variable"');
+    console.error('  6. Enter KEY: TOKEN');
+    console.error('  7. Enter VALUE: [your Discord bot token]');
+    console.error('  8. Click "Save"');
+    console.error('  9. Redeploy the service\n');
+    console.error('OPTION 2: Railway CLI');
+    console.error('  $ railway login');
+    console.error('  $ railway link');
+    console.error('  $ railway variables set TOKEN=your_token_here');
+    console.error('  $ railway up\n');
+  } else {
+    console.error('\n💻 YOU ARE LOCAL - ACTION REQUIRED:\n');
+    console.error('  1. Get token from: https://discord.com/developers/applications');
+    console.error('  2. Create/update .env file in project root:');
+    console.error('     TOKEN=your_token_here');
+    console.error('  3. Run: npm start\n');
+  }
+  
+  console.error('Get your Discord bot token:');
+  console.error('  https://discord.com/developers/applications\n');
+  console.error('='.repeat(80) + '\n');
   process.exit(1);
 }
 
@@ -1638,14 +1666,22 @@ if (typeof DISCORD_TOKEN !== 'string' || DISCORD_TOKEN.length < 50) {
 console.log('✅ Token validation passed. Connecting to Discord...\n');
 
 client.login(DISCORD_TOKEN).catch((error) => {
-  console.error('\n❌ Discord login failed:', error.message);
   if (error.code === 'TokenInvalid') {
-    console.error('\nToken is invalid. Possible causes:');
-    console.error('  - Token was regenerated or revoked');
-    console.error('  - Token has changed since last deployment');
-    console.error('  - Token is expired or malformed');
-    console.error('\nSolution: Get a fresh token from https://discord.com/developers/applications');
-    console.error('Then update your Railway variables or .env file and redeploy.\n');
+    console.error('\n' + '='.repeat(80));
+    console.error('❌ DISCORD LOGIN FAILED: Token is invalid');
+    console.error('='.repeat(80));
+    console.error('\nPossible causes:');
+    console.error('  1. TOKEN environment variable not set on Railway');
+    console.error('  2. TOKEN value is incorrect or expired');
+    console.error('  3. Token was regenerated in Discord Developer Portal');
+    console.error('  4. Token has whitespace or special characters\n');
+    console.error('SOLUTIONS:');
+    console.error('  • On Railway: Set TOKEN variable (see instructions above)');
+    console.error('  • On Local: Check .env file TOKEN value');
+    console.error('  • Regenerate: https://discord.com/developers/applications\n');
+    console.error('='.repeat(80) + '\n');
+  } else {
+    console.error('❌ Discord login failed:', error.message);
   }
   process.exit(1);
 });
