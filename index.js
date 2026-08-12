@@ -1,9 +1,27 @@
 require('dotenv').config();
 
-// Debug: Log what environment variables are loaded
-console.log('[ENV] process.env.TOKEN exists:', !!process.env.TOKEN);
-console.log('[ENV] process.env.DISCORD_TOKEN exists:', !!process.env.DISCORD_TOKEN);
-console.log('[ENV] All env keys count:', Object.keys(process.env).length);
+// CRITICAL: Log environment status IMMEDIATELY
+console.log('\n========================================');
+console.log('🤖 BOT STARTUP DIAGNOSTICS');
+console.log('========================================');
+console.log('Platform:', process.env.NODE_ENV || 'production');
+console.log('Process ID:', process.pid);
+
+// Count actual variables (excluding npm_* and internal ones)
+const userVars = Object.keys(process.env).filter(k => 
+  !k.startsWith('npm_') && 
+  !k.startsWith('NODE_') && 
+  !k.startsWith('PWD') &&
+  k !== 'PATH'
+);
+console.log(`User-defined env variables: ${userVars.length}`);
+console.log('TOKEN present:', !!process.env.TOKEN);
+console.log('DISCORD_TOKEN present:', !!process.env.DISCORD_TOKEN);
+
+if (userVars.length > 0) {
+  console.log('Available variables:', userVars.slice(0, 5).join(', ') + (userVars.length > 5 ? '...' : ''));
+}
+console.log('========================================\n');
 
 const {
   Client,
