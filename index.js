@@ -37,7 +37,7 @@ const {
   EmbedBuilder,
   Events
 } = require('discord.js');
-const { joinVoiceChannel } =
+const { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus } =
  require('@discordjs/voice');
 
 const crypto = require('crypto');
@@ -1366,57 +1366,91 @@ client.on('interactionCreate', async interaction => {
 
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
-  // &go voice <CHANNEL_ID>
-if (content.toLowerCase().startsWith('&go voice')) {
- const allowedRoles = [
-  '1506540916519731310', // Supervisor
-  '1537318639395545139', // Leader Manager
-  '1450212500581646460'  // Owner
-];
+  console.log(`[MSG] ${message.author.tag} (${message.author.id}) in ${message.channel?.id || 'dm'}: ${message.content}`);
+  // &go voice <CHANNEL_ID> | &go leave
+  const content = (message.content || '').trim();
+  if (content.toLowerCase().startsWith('&go')) {
+    console.log('[CMD] Detected &go command from', message.author.id);
+    const allowedRoles = [
+      '1506540916519731310', // Supervisor
+      '1537318639395545139', // Leader Manager
+      '1450212500581646460'  // Owner
+    ];
 
-const hasPermission = message.member?.roles.cache.some(role =>
-  allowedRoles.includes(role.id)
-);
+    const hasPermission = message.member?.roles.cache.some(role =>
+      allowedRoles.includes(role.id)
+    );
+    console.log('[CMD] allowedRoles=', allowedRoles, 'userRoles=', message.member?.roles.cache.map(r => r.id));
+    if (!hasPermission) {
+      console.log('[CMD] permission denied for user', message.author.id);
+      return message.reply('🚫 You do not have permission to use this command.');
+    }
 
-if (!hasPermission) {
-  return message.reply('have some roles negga');
-}
+    const args = content.split(/\s+/);
+    const subCommand = (args[1] || '').toLowerCase();
 
-  const args = content.split(/\s+/);
-  const voiceChannelId = args[2];
+    // &go leave — disconnect from any voice in this guild
+    if (subCommand === 'leave' || subCommand === 'disconnect' || subCommand === 'stop') {
+      const existing = getVoiceConnection(message.guild.id);
+      if (!existing) {
+        return message.reply('❌ أنا مش متصل بأي Voice Channel حالياً.');
+      }
+      existing.destroy();
+      return message.reply('✅ انفصلت من الـ Voice Channel.');
+    }
 
-  if (!voiceChannelId) {
-    return message.reply('❌ الاستخدام الصحيح: `&go voice CHANNEL_ID`');
-  }
+    if (subCommand !== 'voice') {
+      return message.reply('❌ الاستخدام الصحيح: `&go voice CHANNEL_ID` أو `&go leave`');
+    }
 
-  const voiceChannel = await message.guild.channels.fetch(voiceChannelId).catch(() => null);
+    const voiceChannelId = args[2];
 
-  if (!voiceChannel) {
-    return message.reply('❌ ما لقيت الـVoice Channel بالـID ده.');
-  }
+    if (!voiceChannelId) {
+      return message.reply('❌ الاستخدام الصحيح: `&go voice CHANNEL_ID`');
+    }
 
-  if (!voiceChannel.isVoiceBased()) {
-    return message.reply('❌ الـChannel ده ما Voice Channel.');
-  }
+    const voiceChannel = await message.guild.channels.fetch(voiceChannelId).catch(() => null);
 
-  try {
-    joinVoiceChannel({
-      channelId: voiceChannel.id,
-      guildId: voiceChannel.guild.id,
-      adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-      selfDeaf: false,
-      selfMute: false
-    });
+    if (!voiceChannel) {
+      return message.reply('❌ ما لقيت الـVoice Channel بالـID ده.');
+    }
 
-    return message.reply(`✅ دخلت الـVoice Channel: **${voiceChannel.name}**`);
-  } catch (error) {
-    console.error('Failed to join voice channel:', error);
-    return message.reply('❌ حصل خطأ وأنا بحاول أدخل الـVoice Channel.');
-  }
-}
-  const content = message.content.trim();
-  if (content === '@palestin77''@reax_002') {}
-    return message.reply('Your have summend the lord.Speeak');
+    if (!voiceChannel.isVoiceBased()) {
+      return message.reply('❌ الـChannel ده ما Voice Channel.');
+    }
+
+    try {
+      // Destroy any existing connection for this guild first, then create a NEW one.
+      // We must hold the returned connection in a persistent reference so it
+      // isn't garbage collected and the bot doesn't immediately leave.
+      const existing = getVoiceConnection(message.guild.id);
+      if (existing) { try { existing.destroy(); } catch (e) {} }
+
+      const connection = joinVoiceChannel({
+        channelId: voiceChannel.id,
+        guildId: voiceChannel.guild.id,
+        adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+        selfDeaf: false,
+        selfMute: false
+      });
+
+      // Keep the connection alive persistently via getVoiceConnection registry.
+      // Show a clear success only once the connection is Ready.
+      connection.on('stateChange', (oldState, newState) => {
+        console.log(`[VOICE] guild=${voiceChannel.guild.id} channel=${voiceChannel.id} ${oldState.status} -> ${newState.status}`);
+      });
+      setTimeout(() => {
+        const conn = getVoiceConnection(voiceChannel.guild.id);
+        if (conn && conn.state?.status === VoiceConnectionStatus.Ready) {
+          message.channel.send(`✅ دخلت الـVoice Channel: **${voiceChannel.name}**`).catch(() => null);
+        }
+      }, 1500);
+
+      return message.reply(`⏳ جاري دخول الـVoice Channel: **${voiceChannel.name}**...`);
+    } catch (error) {
+      console.error('Failed to join voice channel:', error);
+      return message.reply('❌ حصل خطأ وأنا بحاول أدخل الـVoice Channel.');
+    }
   }
 
   if (content.toLowerCase().startsWith('&rolelist')) {
