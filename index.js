@@ -37,7 +37,7 @@ const {
   EmbedBuilder,
   Events
 } = require('discord.js');
-const { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus } =
+const { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, entersState } =
  require('@discordjs/voice');
 
 const crypto = require('crypto');
@@ -1419,10 +1419,29 @@ client.on('messageCreate', async message => {
       return message.reply('❌ الـChannel ده ما Voice Channel.');
     }
 
+    // Check the bot's permissions BEFORE trying to join so we can give a clear
+    // error instead of leaving the connection stuck in "signalling" forever.
+    let me = message.guild.members.me;
+    if (!me) {
+      try { me = await message.guild.members.fetch(message.client.user.id); } catch (e) {}
+    }
+    if (me) {
+      try {
+        const perms = voiceChannel.permissionsFor(me);
+        const missing = [];
+        if (!perms.has(PermissionsBitField.Flags.ViewChannel)) missing.push('View Channel');
+        if (!perms.has(PermissionsBitField.Flags.Connect)) missing.push('Connect');
+        if (!perms.has(PermissionsBitField.Flags.Speak)) missing.push('Speak');
+        if (missing.length > 0) {
+          return message.reply(`🚫 البوت محتاج صلاحيات في روم الـVoice ده: **${missing.join(', ')}**. من فضلك اضبط صلاحيات البوت و جرّب تاني.`);
+        }
+      } catch (e) {
+        console.error('[VOICE] Permissions check failed:', e);
+      }
+    }
+
     try {
       // Destroy any existing connection for this guild first, then create a NEW one.
-      // We must hold the returned connection in a persistent reference so it
-      // isn't garbage collected and the bot doesn't immediately leave.
       const existing = getVoiceConnection(message.guild.id);
       if (existing) { try { existing.destroy(); } catch (e) {} }
 
@@ -1434,17 +1453,41 @@ client.on('messageCreate', async message => {
         selfMute: false
       });
 
-      // Keep the connection alive persistently via getVoiceConnection registry.
-      // Show a clear success only once the connection is Ready.
+      // Keep the connection alive persistently via the getVoiceConnection registry
+      // (storing it in a module-level ref prevents accidental garbage collection).
+      global.__avVoiceConnections = global.__avVoiceConnections || new Map();
+      global.__avVoiceConnections.set(voiceChannel.guild.id, connection);
+
       connection.on('stateChange', (oldState, newState) => {
         console.log(`[VOICE] guild=${voiceChannel.guild.id} channel=${voiceChannel.id} ${oldState.status} -> ${newState.status}`);
       });
-      setTimeout(() => {
-        const conn = getVoiceConnection(voiceChannel.guild.id);
-        if (conn && conn.state?.status === VoiceConnectionStatus.Ready) {
-          message.channel.send(`✅ دخلت الـVoice Channel: **${voiceChannel.name}**`).catch(() => null);
+      connection.on('error', (err) => {
+        console.error('[VOICE ERROR]', err);
+      });
+
+      // Report "Ready" only once the connection actually reaches Ready.
+      try {
+        await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
+
+        // Set the bot's server (guild) nickname / display name to the server tag.
+        // Uses SERVER_TAG env var if set, otherwise falls back to the guild name.
+        const serverTag = (process.env.SERVER_TAG && process.env.SERVER_TAG.trim()) || message.guild.name;
+        try {
+          const botSelf = message.guild.members.me;
+          await botSelf.setNickname(serverTag);
+          console.log(`[VOICE] Set bot nickname in guild ${message.guild.id} to "${serverTag}"`);
+        } catch (nickErr) {
+          console.error('[VOICE] Failed to set bot nickname:', nickErr);
+          await message.channel.send('⚠️ ما قدرت أغيّر اسمي (اللقب) للسيرفر. تأكد أن البوت عنده صلاحية تغيير الاسم أو أن رتبة البوت أعلى من الحاجة.').catch(() => null);
         }
-      }, 1500);
+
+        message.channel.send(`✅ دخلت الـVoice Channel: **${voiceChannel.name}** (tag: **${serverTag}**)`).catch(() => null);
+      } catch (err) {
+        console.error('[VOICE] Connection did not reach Ready:', err);
+        try { connection.destroy(); } catch (e) {}
+        global.__avVoiceConnections.delete(voiceChannel.guild.id);
+        return message.reply('❌ ما قدرت أدخل الـVoice Channel. تأكد أن البوت عنده صلاحيات Connect و Speak في الروم ده.');
+      }
 
       return message.reply(`⏳ جاري دخول الـVoice Channel: **${voiceChannel.name}**...`);
     } catch (error) {
