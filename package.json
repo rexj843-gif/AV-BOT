@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "npm install --omit=dev && node index.js",
+    "start": "npm install --include=prod --no-audit --no-fund && node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
