@@ -1713,12 +1713,18 @@ client.on('messageCreate', async message => {
   }
 });
 
-const DISCORD_TOKEN = (process.env.DISCORD_TOKEN || process.env.TOKEN)?.trim();
+const rawToken = process.env.DISCORD_TOKEN || process.env.TOKEN || '';
+const DISCORD_TOKEN = rawToken.trim();
 
 console.log('[TOKEN CHECK]');
 console.log('  DISCORD_TOKEN from env:', !!process.env.DISCORD_TOKEN);
 console.log('  TOKEN from env:', !!process.env.TOKEN);
-console.log('  Selected token length:', DISCORD_TOKEN?.length || 0);
+console.log('  Raw token length (before trim):', rawToken.length);
+console.log('  Trimmed token length:', DISCORD_TOKEN.length);
+console.log('  Token has leading/trailing whitespace:', rawToken !== DISCORD_TOKEN);
+console.log('  Token prefix:', DISCORD_TOKEN ? DISCORD_TOKEN.slice(0, 6) + '...' : '(empty)');
+console.log('  Token parts (expected 3):', DISCORD_TOKEN.split('.').length);
+console.log('  Token quotes present:', /^".*"$/.test(DISCORD_TOKEN) || /^'.*'$/.test(DISCORD_TOKEN));
 
 if (!DISCORD_TOKEN) {
   const isRailway = process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_SERVICE_NAME;
