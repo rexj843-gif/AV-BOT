@@ -37,6 +37,8 @@ const {
   EmbedBuilder,
   Events
 } = require('discord.js');
+const { joinVoiceChannel } =
+ require('@discordjs/voice');
 
 const crypto = require('crypto');
 const fs = require('fs');
@@ -1319,6 +1321,23 @@ client.on('interactionCreate', async interaction => {
           try { const lp = path.join(SUBMISSION_LOCKS_DIR, `${submissionHash}.lock`); if (fs.existsSync(lp)) fs.unlinkSync(lp); } catch (e) {}
         }
 
+        // Also send to APPLY_MESSAGE_CHANNEL_ID with applicant mention
+        if (APPLY_MESSAGE_CHANNEL_ID && APPLY_MESSAGE_CHANNEL_ID !== targetChannel?.id) {
+          try {
+            const applyMsgChannel = await client.channels.fetch(APPLY_MESSAGE_CHANNEL_ID).catch(() => null);
+            if (applyMsgChannel && applyMsgChannel.isTextBased()) {
+              const applicantMention = `<@${interaction.user.id}>`;
+              const applyMsgContent = `${applicantMention} (${interaction.user.tag})`;
+              const sentApplyMsg = await safeChannelSend(applyMsgChannel, { content: applyMsgContent, embeds: [embed], components: [row] }, `apply_notify_${interaction.user.id}_${applicationNumber}`);
+              if (sentApplyMsg) {
+                console.log('[APP NOTIFY] sent to APPLY_MESSAGE_CHANNEL', `channel=${APPLY_MESSAGE_CHANNEL_ID}`, `applicant=${interaction.user.id}`, `applicationNumber=${applicationNumber}`);
+              }
+            }
+          } catch (error) {
+            console.error('[APP NOTIFY ERROR] failed to send to APPLY_MESSAGE_CHANNEL:', error);
+          }
+        }
+
         await sendStaffLog({
           action: interaction.customId === 'event_apply_form' ? '📝 Event Application Submitted' : '📝 Application Submitted',
           applicantUser: interaction.user,
@@ -1347,9 +1366,57 @@ client.on('interactionCreate', async interaction => {
 
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
+  // &go voice <CHANNEL_ID>
+if (content.toLowerCase().startsWith('&go voice')) {
+ const allowedRoles = [
+  '1506540916519731310', // Supervisor
+  '1537318639395545139', // Leader Manager
+  '1450212500581646460'  // Owner
+];
+
+const hasPermission = message.member?.roles.cache.some(role =>
+  allowedRoles.includes(role.id)
+);
+
+if (!hasPermission) {
+  return message.reply('have some roles negga');
+}
+
+  const args = content.split(/\s+/);
+  const voiceChannelId = args[2];
+
+  if (!voiceChannelId) {
+    return message.reply('❌ الاستخدام الصحيح: `&go voice CHANNEL_ID`');
+  }
+
+  const voiceChannel = await message.guild.channels.fetch(voiceChannelId).catch(() => null);
+
+  if (!voiceChannel) {
+    return message.reply('❌ ما لقيت الـVoice Channel بالـID ده.');
+  }
+
+  if (!voiceChannel.isVoiceBased()) {
+    return message.reply('❌ الـChannel ده ما Voice Channel.');
+  }
+
+  try {
+    joinVoiceChannel({
+      channelId: voiceChannel.id,
+      guildId: voiceChannel.guild.id,
+      adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+      selfDeaf: false,
+      selfMute: false
+    });
+
+    return message.reply(`✅ دخلت الـVoice Channel: **${voiceChannel.name}**`);
+  } catch (error) {
+    console.error('Failed to join voice channel:', error);
+    return message.reply('❌ حصل خطأ وأنا بحاول أدخل الـVoice Channel.');
+  }
+}
   const content = message.content.trim();
-  if (content === '!ping') {
-    return message.reply('🏓 Pong!');
+  if (content === '@palestin77''@reax_002') {}
+    return message.reply('Your have summend the lord.Speeak');
   }
 
   if (content.toLowerCase().startsWith('&rolelist')) {
