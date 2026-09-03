@@ -92,11 +92,14 @@ changes/fixes made to the code.
 
 4. FIXED: Railway deploys failing with "Cannot find module '@discordjs/voice'".
    - Removed the committed node_modules/ folder from the repository so
-     Railway installs dependencies itself.
-   - Regenerated package-lock.json to force a completely fresh npm install
-     on the next Railway build (fixes stale Nixpacks build cache).
-   - IMPORTANT: in the Railway dashboard, set the service's Build cache to
-     "Disabled" (or use Redeploy) once so the fresh install is used.
+     Railway installs dependencies itself (node_modules is now gitignored).
+   - Regenerated package-lock.json to force a clean npm install.
+   - Removed the forced "nixpacks" builder from railway.json so Railway uses
+     its current default builder (Railpack), which reliably runs npm ci /
+     npm install for Node projects. Forcing the deprecated Nixpacks builder
+     was causing the dependency-install step to fail.
+   - IMPORTANT: in the Railway dashboard, set the service env variable
+     NO_CACHE=1 (and/or Redeploy) once so a fully fresh install is used.
 
 ---------------------------------------------------
  REQUIRED .env VARIABLES
