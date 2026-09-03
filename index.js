@@ -37,8 +37,15 @@ const {
   EmbedBuilder,
   Events
 } = require('discord.js');
-const { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, entersState } =
- require('@discordjs/voice');
+let joinVoiceChannel;
+let getVoiceConnection;
+let VoiceConnectionStatus;
+let entersState;
+try {
+  ({ joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, entersState } = require('@discordjs/voice'));
+} catch (error) {
+  console.error('[VOICE] @discordjs/voice is unavailable:', error.message);
+}
 
 const crypto = require('crypto');
 const fs = require('fs');
@@ -1371,6 +1378,9 @@ client.on('messageCreate', async message => {
   const content = (message.content || '').trim();
   if (content.toLowerCase().startsWith('&go')) {
     console.log('[CMD] Detected &go command from', message.author.id);
+    if (!joinVoiceChannel) {
+      return message.reply('❌ Voice features are unavailable because @discordjs/voice is not installed.');
+    }
     const allowedRoles = [
       '1506540916519731310', // Supervisor
       '1537318639395545139', // Leader Manager
