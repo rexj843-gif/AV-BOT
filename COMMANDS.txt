@@ -96,10 +96,12 @@ changes/fixes made to the code.
    - Regenerated package-lock.json to force a clean npm install.
    - Removed the forced "nixpacks" builder from railway.json so Railway uses
      its current default builder (Railpack).
-   - The start command in railway.json now explicitly runs
-     `npm install --omit=dev && node index.js` BEFORE starting the bot. This
-     guarantees @discordjs/voice (and all dependencies) are installed even if
-     the build-phase install step is skipped by Railway's builder.
+   - The package.json "start" script is now
+     `npm install --omit=dev && node index.js`, which installs all
+     dependencies BEFORE the bot starts. This guarantees
+     @discordjs/voice (and everything else) is present even if Railway's
+     build-phase install step is skipped. Because Railway always runs
+     `npm start`, the install is guaranteed regardless of the Start Command.
    - NOTE: do NOT use the NO_CACHE env variable - it causes the build to fail
      with "secret NO_CACHE not found". Just redeploy normally.
 
