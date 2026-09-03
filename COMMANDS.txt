@@ -1,0 +1,113 @@
+===========================================
+ AVENGERS DISCORD BOT - COMMANDS & CHANGES
+===========================================
+
+This file lists all the commands the bot understands plus the recent
+changes/fixes made to the code.
+
+---------------------------------------------------
+ VOICE COMMANDS (&go)
+---------------------------------------------------
+
+&go voice <CHANNEL_ID>
+    - Makes the bot join the given voice channel.
+    - Permissions needed: Superviseur / Leader Manager / Owner roles.
+    - The bot checks it has "View Channel", "Connect" and "Speak" and
+      reports exactly which one is missing if it can't join.
+    - Once connected, the bot changes its own server nickname (display
+      name) to the server tag.
+    - The server tag is taken from the SERVER_TAG variable in .env if set,
+      otherwise it falls back to the server (guild) name.
+
+&go leave          (also &go disconnect / &go stop)
+    - Disconnects the bot from the voice channel in the current server.
+
+&go                (any other subcommand)
+    - Shows usage: `&go voice CHANNEL_ID` or `&go leave`.
+
+---------------------------------------------------
+ ROLE COMMANDS
+---------------------------------------------------
+
+&rolelist <ROLE_ID>
+    - Shows the members of a role with online/offline status.
+    - If there are more than 10 members, Previous/Next buttons appear.
+
+---------------------------------------------------
+ APPLICATION COMMANDS
+---------------------------------------------------
+
+&applyagain / !applyagain / &applyagian / !applyagian
+    - Lets a user (or an admin for someone else) reset their application
+      status and try applying again. Deletes previous application messages.
+
+&apply <USER_ID>
+    - (Admin only) Removes the temporary application ban for a user so they
+      can apply again.
+
+!blacklist <USER_ID>       (Admin only)
+    - Permanently blacklists a user from applying.
+
+!unblacklist <USER_ID>     (Admin only)
+    - Removes a user from the blacklist.
+
+!clear apply log           (Admin only)
+    - Deletes the bot's application log messages (up to 100).
+
+!clear applications        (Admin only)
+    - Deletes the bot's application messages (up to 100).
+
+!dedupeapply               (Admin only)
+    - Removes duplicate apply messages across the configured channels.
+
+!postapply                 (Requires Manage Guild permission)
+    - Posts the application embed + buttons into the current channel.
+
+---------------------------------------------------
+ BUTTONS / MODALS
+---------------------------------------------------
+- Apply / Event Apply buttons open an application form (modal).
+- Accept / Reject buttons on an application approve or reject the member.
+- Show Status button shows the applicant's online + voice status and, if in
+  voice, offers a "Move For Test" button.
+- Move For Test moves the applicant (and clan leaders in voice with the
+  CLAN_LEADER_ROLE) into the TEST_VOICE_CHANNEL_ID.
+
+---------------------------------------------------
+ RECENT CHANGES / FIXES
+---------------------------------------------------
+1. FIXED: &go voice was not joining reliably.
+   - The bot now USES entersState() to wait until the voice connection truly
+     reaches the "Ready" state (instead of a fixed 1.5s timer).
+   - If it can't connect, it reports a clear error message.
+
+2. ADDED: Voice permission pre-check.
+   - Before joining, the bot verifies it has View Channel / Connect / Speak
+     and tells you which permission is missing (missing permissions were the
+     cause of the "stuck in signalling / never joins" problem).
+
+3. ADDED: Server tag nickname (display name).
+   - After joining voice, the bot sets its own nickname in the server to the
+     server tag (SERVER_TAG env var, or the server name by default).
+
+4. FIXED: Railway deploys failing with "Cannot find module '@discordjs/voice'".
+   - Removed the committed node_modules/ folder from the repository so
+     Railway installs dependencies itself.
+   - Regenerated package-lock.json to force a completely fresh npm install
+     on the next Railway build (fixes stale Nixpacks build cache).
+   - IMPORTANT: in the Railway dashboard, set the service's Build cache to
+     "Disabled" (or use Redeploy) once so the fresh install is used.
+
+---------------------------------------------------
+ REQUIRED .env VARIABLES
+---------------------------------------------------
+TOKEN=your_discord_bot_token
+CLIENT_ID=...
+GUILD_ID=...
+APPLY_CHANNEL_ID=...
+APPLY_MESSAGE_CHANNEL_ID=...
+APPLY_LOG_CHANNEL_ID=...
+CLAN_LEADER_ROLE_ID=...
+AV_FAMILY_ROLE_ID=...
+TEST_VOICE_CHANNEL_ID=...
+SERVER_TAG=AVENGERS   (optional - bot's nickname tag when joining voice)
