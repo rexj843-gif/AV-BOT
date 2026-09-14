@@ -157,6 +157,7 @@ const APPLICATIONS_CHANNEL_ID = process.env.APPLICATIONS_CHANNEL_ID || process.e
 const APPLY_MESSAGE_CHANNEL_ID = process.env.APPLY_MESSAGE_CHANNEL_ID || process.env.APPLY_CHANNEL_ID;
 const APPLY_LOG_CHANNEL_ID = process.env.APPLY_LOG_CHANNEL_ID;
 const EVENT_APPLICATION_LOG_CHANNEL_ID = process.env.EVENT_APPLICATION_LOG_CHANNEL_ID || process.env.EVENT_APPLY_LOG_CHANNEL_ID || '1536969703329763358';
+const TERM_F_APPLICATION_LOG_CHANNEL_ID = process.env.TERM_F_APPLICATION_LOG_CHANNEL_ID || process.env.TERM_F_APPLY_LOG_CHANNEL_ID || null;
 const CLAN_LEADER_ROLE_ID = process.env.CLAN_LEADER_ROLE_ID;
 const AV_FAMILY_ROLE_ID = process.env.AV_FAMILY_ROLE_ID || process.env.ACCEPT_ROLE_ID;
 const TEST_VOICE_CHANNEL_ID = process.env.TEST_VOICE_CHANNEL_ID;
@@ -543,6 +544,11 @@ function createApplyButtonRow() {
       .setCustomId('event_apply')
       .setLabel('Event Apply')
       .setEmoji('🎯')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId('term_f_apply')
+      .setLabel('Term F')
+      .setEmoji('📋')
       .setStyle(ButtonStyle.Primary)
   );
 }
@@ -574,6 +580,38 @@ function createEventApplyModal() {
     new ActionRowBuilder().addComponents(sqNameInput),
     new ActionRowBuilder().addComponents(sqSizeInput),
     new ActionRowBuilder().addComponents(detailsInput)
+  );
+
+  return modal;
+}
+
+function createTermFApplyModal() {
+  const modal = new ModalBuilder()
+    .setCustomId('term_f_apply_form')
+    .setTitle('تقديم للـ Term F');
+
+  const termNameInput = new TextInputBuilder()
+    .setCustomId('term_f_name')
+    .setLabel('الاسم')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+
+  const termDaysInput = new TextInputBuilder()
+    .setCustomId('term_f_days')
+    .setLabel('عدد أيام Term F')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+
+  const termDetailsInput = new TextInputBuilder()
+    .setCustomId('term_f_details')
+    .setLabel('معلومات إضافية للتقديم')
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(termNameInput),
+    new ActionRowBuilder().addComponents(termDaysInput),
+    new ActionRowBuilder().addComponents(termDetailsInput)
   );
 
   return modal;
