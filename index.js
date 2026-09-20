@@ -163,6 +163,7 @@ const AV_FAMILY_ROLE_ID = process.env.AV_FAMILY_ROLE_ID || process.env.ACCEPT_RO
 const TEST_VOICE_CHANNEL_ID = process.env.TEST_VOICE_CHANNEL_ID;
 const MEETING_CHANNEL_ID = process.env.MEETING_CHANNEL_ID || '1551287625996967948';
 const MEETING_VOICE_CHANNEL_ID = process.env.MEETING_VOICE_CHANNEL_ID || '1551290194538270871';
+const CLAIM_LOG_CHANNEL_ID = process.env.CLAIM_LOG_CHANNEL_ID || '1551321628900724786';
 const STAFF_MEETING_ROLES = [
   ...new Set(
     (process.env.STAFF_MEETING_ROLES || [
@@ -1377,7 +1378,8 @@ client.on('interactionCreate', async interaction => {
           applicantUser: { tag: `<@${interaction.user.id}>`, username: interaction.user.username },
           applicantId: interaction.user.id,
           staffUser: interaction.user,
-          details: `Claimed the staff meeting in <#${MEETING_CHANNEL_ID}>`
+          details: `Claimed the staff meeting in <#${MEETING_CHANNEL_ID}>`,
+          logChannelId: CLAIM_LOG_CHANNEL_ID
         }).catch(() => null);
         if (interaction.channel && interaction.channel.isTextBased()) {
           await interaction.channel.send(`🎙️ <@${interaction.user.id}> claimed the staff meeting!`).catch(() => null);
