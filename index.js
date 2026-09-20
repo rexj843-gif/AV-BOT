@@ -846,18 +846,21 @@ function parseRoleListCustomId(customId) {
   };
 }
 
-function createStaffMeetingEmbed() {
+function createStaffMeetingEmbed({ closed = false, hostedBy = 'Phalestine' } = {}) {
+  const description =
+    'Welcome to the staff meeting panel.\n\n' +
+    '📌 **Claim** — claim this meeting as host / organizer.\n' +
+    '🎧 **Move For Meeting** — moves you (and staff in voice) to the meeting voice room.\n\n' +
+    `🎙️ Voice Room: <#${MEETING_VOICE_CHANNEL_ID}>\n` +
+    `📍 Meeting Channel: <#${MEETING_CHANNEL_ID}>` +
+    (closed
+      ? `\n\n🔒 **Meeting Closed**\n👤 **Hosted by:** ${hostedBy}`
+      : '');
   return new EmbedBuilder()
-    .setTitle('🎙️ STAFF MEETING')
-    .setDescription(
-      'Welcome to the staff meeting panel.\n\n' +
-      '📌 **Claim** — claim this meeting as host / organizer.\n' +
-      '🎧 **Move For Meeting** — moves you (and staff in voice) to the meeting voice room.\n\n' +
-      `🎙️ Voice Room: <#${MEETING_VOICE_CHANNEL_ID}>\n` +
-      `📍 Meeting Channel: <#${MEETING_CHANNEL_ID}>`
-    )
-    .setColor(0x9b59b6)
-    .setFooter({ text: 'AVENGERS' });
+    .setTitle(closed ? '🔒 STAFF MEETING — CLOSED' : '🎙️ STAFF MEETING')
+    .setDescription(description)
+    .setColor(closed ? 0x992d22 : 0x9b59b6)
+    .setFooter({ text: closed ? `Hosted by ${hostedBy}` : 'AVENGERS' });
 }
 
 function createMeetingButtonRow() {
@@ -1768,6 +1771,37 @@ client.on('messageCreate', async message => {
       details: `Posted a staff meeting announcement in <#${message.channel.id}>`
     }).catch(() => null);
     return message.reply('✅ Staff meeting announcement posted.');
+  }
+
+  // Staff meeting close: !close meeting / &close meeting / !closemeeting ...
+  if (/^[!&]?\s*close\s*me+ting?s?\s*$/i.test(content)) {
+    const isAdmin = message.member?.permissions.has(PermissionsBitField.Flags.Administrator);
+    const hasStaffRole = STAFF_MEETING_ROLES.some(roleId => message.member?.roles.cache.has(roleId));
+    if (!isAdmin && !hasStaffRole) {
+      return message.reply('🚫 You do not have permission to close meetings.');
+    }
+
+    const mentions = STAFF_MEETING_ROLES.map(roleId => `<@&${roleId}>`).join(' ');
+    const announcement =
+      `🔒 **STAFF MEETING CLOSED**\n\n${mentions}\n\n` +
+      `🎙️ Voice Room: <#${MEETING_VOICE_CHANNEL_ID}>\n` +
+      `The staff meeting has been closed. Thank you for attending!`;
+
+    await message.channel.send(announcement).catch(() => null);
+    await message.channel
+      .send({
+        embeds: [createStaffMeetingEmbed({ closed: true, hostedBy: 'Phalestine' })],
+        components: [createMeetingButtonRow()]
+      })
+      .catch(() => null);
+    await sendStaffLog({
+      action: '🔒 Meeting Closed',
+      applicantUser: { tag: `<@${message.author.id}>`, username: message.author.username },
+      applicantId: message.author.id,
+      staffUser: message.author,
+      details: `Closed the staff meeting in <#${message.channel.id}>`
+    }).catch(() => null);
+    return message.reply('✅ Staff meeting closed.');
   }
 
   if (
