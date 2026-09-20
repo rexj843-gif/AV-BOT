@@ -1374,23 +1374,6 @@ client.on('interactionCreate', async interaction => {
           try { const lp = path.join(SUBMISSION_LOCKS_DIR, `${submissionHash}.lock`); if (fs.existsSync(lp)) fs.unlinkSync(lp); } catch (e) {}
         }
 
-        // Also send to APPLY_MESSAGE_CHANNEL_ID with applicant mention
-        if (APPLY_MESSAGE_CHANNEL_ID && APPLY_MESSAGE_CHANNEL_ID !== targetChannel?.id) {
-          try {
-            const applyMsgChannel = await client.channels.fetch(APPLY_MESSAGE_CHANNEL_ID).catch(() => null);
-            if (applyMsgChannel && applyMsgChannel.isTextBased()) {
-              const applicantMention = `<@${interaction.user.id}>`;
-              const applyMsgContent = `${applicantMention} (${interaction.user.tag})`;
-              const sentApplyMsg = await safeChannelSend(applyMsgChannel, { content: applyMsgContent, embeds: [embed], components: [row] }, `apply_notify_${interaction.user.id}_${applicationNumber}`);
-              if (sentApplyMsg) {
-                console.log('[APP NOTIFY] sent to APPLY_MESSAGE_CHANNEL', `channel=${APPLY_MESSAGE_CHANNEL_ID}`, `applicant=${interaction.user.id}`, `applicationNumber=${applicationNumber}`);
-              }
-            }
-          } catch (error) {
-            console.error('[APP NOTIFY ERROR] failed to send to APPLY_MESSAGE_CHANNEL:', error);
-          }
-        }
-
         await sendStaffLog({
           action: interaction.customId === 'event_apply_form' ? '📝 Event Application Submitted'
             : interaction.customId === 'term_f_apply_form' ? '📝 Term F Application Submitted'
