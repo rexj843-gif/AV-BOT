@@ -161,6 +161,28 @@ const TERM_F_APPLICATION_LOG_CHANNEL_ID = process.env.TERM_F_APPLICATION_LOG_CHA
 const CLAN_LEADER_ROLE_ID = process.env.CLAN_LEADER_ROLE_ID;
 const AV_FAMILY_ROLE_ID = process.env.AV_FAMILY_ROLE_ID || process.env.ACCEPT_ROLE_ID;
 const TEST_VOICE_CHANNEL_ID = process.env.TEST_VOICE_CHANNEL_ID;
+const MEETING_CHANNEL_ID = process.env.MEETING_CHANNEL_ID || '1551287625996967948';
+const MEETING_VOICE_CHANNEL_ID = process.env.MEETING_VOICE_CHANNEL_ID || '1551290194538270871';
+const STAFF_MEETING_ROLES = [
+  ...new Set(
+    (process.env.STAFF_MEETING_ROLES || [
+      '1450212500581646460',
+      '1548338723593392198',
+      '1537318639395545139',
+      '1506540916519731310',
+      '1546807156970487838',
+      '1459133371874807921',
+      '1547776062400888912',
+      '1548350425462210570',
+      '1549201615850971216',
+      '1548350896428158976',
+      '1466082863115145441'
+    ].join(','))
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean)
+  )
+];
 
 const blacklistedUsers = loadBlacklistedUsers();
 const submittedApplications = loadSubmittedApplications();
@@ -824,6 +846,59 @@ function parseRoleListCustomId(customId) {
   };
 }
 
+function createStaffMeetingEmbed() {
+  return new EmbedBuilder()
+    .setTitle('🎙️ STAFF MEETING')
+    .setDescription(
+      'Welcome to the staff meeting panel.\n\n' +
+      '📌 **Claim** — claim this meeting as host / organizer.\n' +
+      '🎧 **Move For Meeting** — moves you (and staff in voice) to the meeting voice room.\n\n' +
+      `🎙️ Voice Room: <#${MEETING_VOICE_CHANNEL_ID}>\n` +
+      `📍 Meeting Channel: <#${MEETING_CHANNEL_ID}>`
+    )
+    .setColor(0x9b59b6)
+    .setFooter({ text: 'AVENGERS' });
+}
+
+function createMeetingButtonRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('meeting_claim')
+      .setLabel('Claim')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId('meeting_move')
+      .setLabel('Move For Meeting')
+      .setStyle(ButtonStyle.Primary)
+  );
+}
+
+async function findExistingMeetingMessage(channel) {
+  if (!channel) return null;
+  try {
+    const messages = await channel.messages.fetch({ limit: 10 }).catch(() => null);
+    if (!messages) return null;
+    return messages.find(msg =>
+      msg.author?.id === client.user.id &&
+      msg.components.some(row => row.components.some(c => c.customId === 'meeting_claim' || c.customId === 'meeting_move'))
+    ) || null;
+  } catch (err) {
+    console.error('Failed to find existing meeting message:', err);
+    return null;
+  }
+}
+
+async function ensureMeetingMessage(channel) {
+  if (!channel) return;
+  const existing = await findExistingMeetingMessage(channel);
+  if (existing) {
+    console.log('Found existing staff meeting message; skipping repost.');
+    return;
+  }
+  await safeChannelSend(channel, { embeds: [createStaffMeetingEmbed()], components: [createMeetingButtonRow()] }, 'meeting_post');
+  console.log('Posted staff meeting message to', channel.id);
+}
+
 // Command files were migrated into this single file. No external
 // `./commands` loader is necessary — keep `client.commands` as an
 // empty Collection for compatibility with any code that expects it.
@@ -874,6 +949,24 @@ client.once(Events.ClientReady, () => {
       console.log('Posted apply message to', postChannelId);
     } catch (err) {
       console.error('Failed to post apply message:', err);
+    }
+  })();
+  // Post the persistent staff meeting message (Claim / Move For Meeting) to the meeting channel
+  (async () => {
+    try {
+      const meetingChannel = await client.channels.fetch(MEETING_CHANNEL_ID).catch(err => {
+        console.error(`Failed to fetch meeting channel ${MEETING_CHANNEL_ID}:`, err);
+        return null;
+      });
+      if (!meetingChannel) {
+        return console.log(`Meeting channel not found: ${MEETING_CHANNEL_ID}`);
+      }
+      if (!meetingChannel.isTextBased()) {
+        return console.log(`Meeting channel is not text based: ${meetingChannel.type}`);
+      }
+      await ensureMeetingMessage(meetingChannel);
+    } catch (err) {
+      console.error('Failed to post staff meeting message:', err);
     }
   })();
 });
@@ -1232,6 +1325,84 @@ client.on('interactionCreate', async interaction => {
           ephemeral: true
         });
       }
+
+      if (customId === 'meeting_claim') {
+        await interaction.deferReply({ ephemeral: true });
+        await sendStaffLog({
+          action: '🎙️ Meeting Claimed',
+          applicantUser: { tag: `<@${interaction.user.id}>`, username: interaction.user.username },
+          applicantId: interaction.user.id,
+          staffUser: interaction.user,
+          details: `Claimed the staff meeting in <#${MEETING_CHANNEL_ID}>`
+        }).catch(() => null);
+        if (interaction.channel && interaction.channel.isTextBased()) {
+          await interaction.channel.send(`🎙️ <@${interaction.user.id}> claimed the staff meeting!`).catch(() => null);
+        }
+        return interaction.editReply({
+          content: '✅ You claimed the staff meeting.',
+          ephemeral: true
+        });
+      }
+
+      if (customId === 'meeting_move') {
+        await interaction.deferReply({ ephemeral: true });
+        const meetingVoice = await client.channels.fetch(MEETING_VOICE_CHANNEL_ID).catch(() => null);
+        if (!meetingVoice || !meetingVoice.isVoiceBased()) {
+          return interaction.editReply({
+            content: '❌ Meeting voice room not found.',
+            ephemeral: true
+          });
+        }
+
+        const moved = [];
+        const clicker = interaction.member;
+
+        // Move the button clicker if they are in voice
+        if (clicker?.voice?.channel) {
+          try {
+            await clicker.voice.setChannel(meetingVoice);
+            moved.push(clicker.user.tag);
+          } catch (err) {
+            console.error('Failed moving meeting host:', err);
+          }
+        }
+
+        // Move any members with staff meeting roles who are currently in voice
+        for (const roleId of STAFF_MEETING_ROLES) {
+          const role = await interaction.guild.roles.fetch(roleId).catch(() => null);
+          if (!role) continue;
+          for (const [id, member] of role.members) {
+            if (!member.voice?.channel) continue;
+            if (id === clicker?.id) continue;
+            try {
+              await member.voice.setChannel(meetingVoice);
+              moved.push(member.user.tag);
+            } catch (err) {
+              console.error('Failed moving staff member', member.user.tag, err);
+            }
+          }
+        }
+
+        await sendStaffLog({
+          action: '🎧 Move For Meeting',
+          applicantUser: { tag: `<@${interaction.user.id}>`, username: interaction.user.username },
+          applicantId: interaction.user.id,
+          staffUser: interaction.user,
+          details: `Moved to meeting voice room <#${MEETING_VOICE_CHANNEL_ID}>`
+        }).catch(() => null);
+
+        if (moved.length === 0) {
+          return interaction.editReply({
+            content: '⚠️ No one was moved. Make sure you (or staff) are in a voice channel.',
+            ephemeral: true
+          });
+        }
+
+        return interaction.editReply({
+          content: `✅ Moved to meeting voice room: ${moved.join(', ')}`,
+          ephemeral: true
+        });
+      }
     }
 
     if (interaction.isModalSubmit()) {
@@ -1569,6 +1740,34 @@ client.on('messageCreate', async message => {
     const sent = await message.reply({ embeds: [embed], components: buttons ? [buttons] : [] });
     try { console.log('[ROLE SENT]', `message.id=${sent.id}`, `processingId=${processingId}`, `user=${message.author.id}`, `roleId=${roleId}`, `pid=${process.pid}`); } catch (e) {}
     return sent;
+  }
+
+  // Staff meeting announcement: !addmeeting / !add meeting / &addmeeting ...
+  if (/^[!&]?\s*add\s*me+ting?s?\s*$/i.test(content)) {
+    const isAdmin = message.member?.permissions.has(PermissionsBitField.Flags.Administrator);
+    const hasStaffRole = STAFF_MEETING_ROLES.some(roleId => message.member?.roles.cache.has(roleId));
+    if (!isAdmin && !hasStaffRole) {
+      return message.reply('🚫 You do not have permission to add meeting announcements.');
+    }
+
+    const mentions = STAFF_MEETING_ROLES.map(roleId => `<@&${roleId}>`).join(' ');
+    const announcement =
+      `📢 **STAFF MEETING ANNOUNCEMENT**\n\n${mentions}\n\n` +
+      `🎙️ Voice Room: <#${MEETING_VOICE_CHANNEL_ID}>\n` +
+      `Use the buttons below to **Claim** the meeting or **Move For Meeting** to the voice room.`;
+
+    await message.channel.send(announcement).catch(() => null);
+    await message.channel
+      .send({ embeds: [createStaffMeetingEmbed()], components: [createMeetingButtonRow()] })
+      .catch(() => null);
+    await sendStaffLog({
+      action: '📢 Meeting Announced',
+      applicantUser: { tag: `<@${message.author.id}>`, username: message.author.username },
+      applicantId: message.author.id,
+      staffUser: message.author,
+      details: `Posted a staff meeting announcement in <#${message.channel.id}>`
+    }).catch(() => null);
+    return message.reply('✅ Staff meeting announcement posted.');
   }
 
   if (
