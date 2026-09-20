@@ -949,7 +949,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.isButton()) {
       const customId = interaction.customId;
 
-      if (customId === 'apply' || customId === 'event_apply') {
+      if (customId === 'apply' || customId === 'event_apply' || customId === 'term_f_apply') {
         const userId = interaction.user.id;
         const now = Date.now();
 
@@ -977,6 +977,8 @@ client.on('interactionCreate', async interaction => {
 
         if (customId === 'apply') {
           await interaction.showModal(createApplyModal());
+        } else if (customId === 'term_f_apply') {
+          await interaction.showModal(createTermFApplyModal());
         } else {
           await interaction.showModal(createEventApplyModal());
         }
@@ -1233,7 +1235,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.isModalSubmit()) {
-      if (interaction.customId === 'apply_form' || interaction.customId === 'event_apply_form') {
+      if (interaction.customId === 'apply_form' || interaction.customId === 'event_apply_form' || interaction.customId === 'term_f_apply_form') {
         const interactionId = interaction.id || `${interaction.user.id}_${Date.now()}`;
         let embedDescription;
         let submissionHash;
@@ -1245,6 +1247,12 @@ client.on('interactionCreate', async interaction => {
           const gameId = interaction.fields.getTextInputValue('apply_game_id');
           submissionHash = createSubmissionHash(interaction.user.id, { name, age, playStyle, gameId });
           embedDescription = `**Name:** ${name}\n**Age:** ${age}\n**Apostado or eSports:** ${playStyle}\n**Game ID:** ${gameId}`;
+        } else if (interaction.customId === 'term_f_apply_form') {
+          const termName = interaction.fields.getTextInputValue('term_f_name');
+          const termDays = interaction.fields.getTextInputValue('term_f_days');
+          const termDetails = interaction.fields.getTextInputValue('term_f_details');
+          submissionHash = createSubmissionHash(interaction.user.id, { termName, termDays, termDetails });
+          embedDescription = `**Term F Application**\n**الاسم:** ${termName}\n**عدد أيام Term F:** ${termDays}\n**Additional Info:** ${termDetails || 'None'}`;
         } else {
           const sqName = interaction.fields.getTextInputValue('event_sq_name');
           const sqSize = interaction.fields.getTextInputValue('event_sq_size');
@@ -1384,13 +1392,19 @@ client.on('interactionCreate', async interaction => {
         }
 
         await sendStaffLog({
-          action: interaction.customId === 'event_apply_form' ? '📝 Event Application Submitted' : '📝 Application Submitted',
+          action: interaction.customId === 'event_apply_form' ? '📝 Event Application Submitted'
+            : interaction.customId === 'term_f_apply_form' ? '📝 Term F Application Submitted'
+            : '📝 Application Submitted',
           applicantUser: interaction.user,
           applicantId: interaction.user.id,
           staffUser: { tag: 'System', username: 'System' },
-          details: interaction.customId === 'event_apply_form' ? 'Event application submitted' : 'Application submitted',
+          details: interaction.customId === 'event_apply_form' ? 'Event application submitted'
+            : interaction.customId === 'term_f_apply_form' ? 'Term F application submitted'
+            : 'Application submitted',
           applicationNumber,
-          logChannelId: interaction.customId === 'event_apply_form' ? EVENT_APPLICATION_LOG_CHANNEL_ID : undefined
+          logChannelId: interaction.customId === 'event_apply_form' ? EVENT_APPLICATION_LOG_CHANNEL_ID
+            : interaction.customId === 'term_f_apply_form' ? TERM_F_APPLICATION_LOG_CHANNEL_ID
+            : undefined
         }).catch(() => null);
 
         return await interaction.editReply({
