@@ -1401,29 +1401,13 @@ client.on('interactionCreate', async interaction => {
         const moved = [];
         const clicker = interaction.member;
 
-        // Move the button clicker if they are in voice
+        // Move only the person who pressed the button (must be in voice)
         if (clicker?.voice?.channel) {
           try {
             await clicker.voice.setChannel(meetingVoice);
             moved.push(clicker.user.tag);
           } catch (err) {
-            console.error('Failed moving meeting host:', err);
-          }
-        }
-
-        // Move any members with staff meeting roles who are currently in voice
-        for (const roleId of STAFF_MEETING_ROLES) {
-          const role = await interaction.guild.roles.fetch(roleId).catch(() => null);
-          if (!role) continue;
-          for (const [id, member] of role.members) {
-            if (!member.voice?.channel) continue;
-            if (id === clicker?.id) continue;
-            try {
-              await member.voice.setChannel(meetingVoice);
-              moved.push(member.user.tag);
-            } catch (err) {
-              console.error('Failed moving staff member', member.user.tag, err);
-            }
+            console.error('Failed moving meeting member:', err);
           }
         }
 
