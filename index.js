@@ -183,6 +183,7 @@ const STAFF_MEETING_ROLES = [
       .filter(Boolean)
   )
 ];
+let meetingActive = false;
 
 const blacklistedUsers = loadBlacklistedUsers();
 const submittedApplications = loadSubmittedApplications();
@@ -846,9 +847,10 @@ function parseRoleListCustomId(customId) {
   };
 }
 
-function createStaffMeetingEmbed({ closed = false, hostedBy = 'Phalestine' } = {}) {
+function createStaffMeetingEmbed({ closed = false, hostedBy = 'Phalestine', time = null } = {}) {
   const description =
     'Welcome to the staff meeting panel.\n\n' +
+    (time ? `⏰ **Meeting Time:** ${time}\n\n` : '') +
     '📌 **Claim** — claim this meeting as host / organizer.\n' +
     '🎧 **Move For Meeting** — moves you (and staff in voice) to the meeting voice room.\n\n' +
     `🎙️ Voice Room: <#${MEETING_VOICE_CHANNEL_ID}>\n` +
@@ -924,8 +926,14 @@ async function ensureMeetingMessage(channel) {
   const existing = await findExistingMeetingMessage(channel);
   if (existing) {
     console.log('Found existing staff meeting message; skipping repost.');
+    const claimBtn = existing.components
+      .flatMap(row => row.components)
+      .find(c => c.customId === 'meeting_claim');
+    meetingActive = !!(claimBtn && !claimBtn.disabled);
+    console.log('Meeting active state on startup:', meetingActive);
     return;
   }
+  meetingActive = false;
   await safeChannelSend(channel, { embeds: [createStaffMeetingEmbed()], components: [createMeetingButtonRow()] }, 'meeting_post');
   console.log('Posted staff meeting message to', channel.id);
 }
@@ -1359,6 +1367,12 @@ client.on('interactionCreate', async interaction => {
 
       if (customId === 'meeting_claim') {
         await interaction.deferReply({ ephemeral: true });
+        if (!meetingActive) {
+          return interaction.editReply({
+            content: '❌ No meetings available right now.',
+            ephemeral: true
+          });
+        }
         await sendStaffLog({
           action: '🎙️ Meeting Claimed',
           applicantUser: { tag: `<@${interaction.user.id}>`, username: interaction.user.username },
@@ -1773,8 +1787,10 @@ client.on('messageCreate', async message => {
     return sent;
   }
 
-  // Staff meeting announcement: !addmeeting / !add meeting / &addmeeting ...
-  if (/^[!&]?\s*add\s*me+ting?s?\s*$/i.test(content)) {
+  // Staff meeting announcement: !addmeeting / !add meeting / !add meeting 12:00 - 1:00 ...
+  const addMeetingMatch = content.match(/^[!&]?\s*add\s*me+ting?s?\s*(.*)$/i);
+  if (addMeetingMatch) {
+    const timeRange = (addMeetingMatch[1] || '').trim();
     const isAdmin = message.member?.permissions.has(PermissionsBitField.Flags.Administrator);
     const hasStaffRole = STAFF_MEETING_ROLES.some(roleId => message.member?.roles.cache.has(roleId));
     if (!isAdmin && !hasStaffRole) {
@@ -1784,21 +1800,26 @@ client.on('messageCreate', async message => {
     const mentions = STAFF_MEETING_ROLES.map(roleId => `<@&${roleId}>`).join(' ');
     const announcement =
       `📢 **STAFF MEETING ANNOUNCEMENT**\n\n${mentions}\n\n` +
+      (timeRange ? `⏰ **Time:** ${timeRange}\n\n` : '') +
       `🎙️ Voice Room: <#${MEETING_VOICE_CHANNEL_ID}>\n` +
       `Use the buttons below to **Claim** the meeting or **Move For Meeting** to the voice room.`;
 
     await message.channel.send(announcement).catch(() => null);
     await message.channel
-      .send({ embeds: [createStaffMeetingEmbed()], components: [createMeetingButtonRow()] })
+      .send({
+        embeds: [createStaffMeetingEmbed({ time: timeRange || null })],
+        components: [createMeetingButtonRow()]
+      })
       .catch(() => null);
+    meetingActive = true;
     await sendStaffLog({
       action: '📢 Meeting Announced',
       applicantUser: { tag: `<@${message.author.id}>`, username: message.author.username },
       applicantId: message.author.id,
       staffUser: message.author,
-      details: `Posted a staff meeting announcement in <#${message.channel.id}>`
+      details: `Posted a staff meeting announcement in <#${message.channel.id}>${timeRange ? ` (time: ${timeRange})` : ''}`
     }).catch(() => null);
-    return message.reply('✅ Staff meeting announcement posted.');
+    return message.reply(`✅ Staff meeting announcement posted.${timeRange ? ` Time: **${timeRange}**` : ''}`);
   }
 
   // Staff meeting close: !close meeting / &close meeting / !closemeeting ...
@@ -1834,6 +1855,7 @@ client.on('messageCreate', async message => {
         })
         .catch(() => null);
     }
+    meetingActive = false;
 
     await sendStaffLog({
       action: '🔒 Meeting Closed',
