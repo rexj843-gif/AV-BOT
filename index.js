@@ -880,9 +880,8 @@ function createMeetingButtonRow({ disabled = false } = {}) {
   );
 }
 
-async function editMeetingMessagesToClosed(channel) {
+async function editLastMeetingMessageToClosed(channel) {
   if (!channel) return 0;
-  let edited = 0;
   try {
     const messages = await channel.messages.fetch({ limit: 50 }).catch(() => null);
     if (!messages) return 0;
@@ -898,12 +897,12 @@ async function editMeetingMessagesToClosed(channel) {
           components: [createMeetingButtonRow({ disabled: true })]
         })
         .catch(() => null);
-      edited += 1;
+      return 1;
     }
   } catch (err) {
-    console.error('Failed editing meeting messages:', err);
+    console.error('Failed editing last meeting message:', err);
   }
-  return edited;
+  return 0;
 }
 
 async function findExistingMeetingMessage(channel) {
@@ -1839,11 +1838,11 @@ client.on('messageCreate', async message => {
     await message.channel.send(announcement).catch(() => null);
 
     let editedCount = 0;
-    editedCount += await editMeetingMessagesToClosed(message.channel);
-    if (MEETING_CHANNEL_ID && MEETING_CHANNEL_ID !== message.channel.id) {
+    editedCount += await editLastMeetingMessageToClosed(message.channel);
+    if (editedCount === 0 && MEETING_CHANNEL_ID && MEETING_CHANNEL_ID !== message.channel.id) {
       const meetingChannel = await client.channels.fetch(MEETING_CHANNEL_ID).catch(() => null);
       if (meetingChannel && meetingChannel.isTextBased()) {
-        editedCount += await editMeetingMessagesToClosed(meetingChannel);
+        editedCount += await editLastMeetingMessageToClosed(meetingChannel);
       }
     }
 
