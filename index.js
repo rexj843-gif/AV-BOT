@@ -863,17 +863,45 @@ function createStaffMeetingEmbed({ closed = false, hostedBy = 'Phalestine' } = {
     .setFooter({ text: closed ? `Hosted by ${hostedBy}` : 'AVENGERS' });
 }
 
-function createMeetingButtonRow() {
+function createMeetingButtonRow({ disabled = false } = {}) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId('meeting_claim')
       .setLabel('Claim')
-      .setStyle(ButtonStyle.Success),
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(disabled),
     new ButtonBuilder()
       .setCustomId('meeting_move')
       .setLabel('Move For Meeting')
       .setStyle(ButtonStyle.Primary)
+      .setDisabled(disabled)
   );
+}
+
+async function editMeetingMessagesToClosed(channel) {
+  if (!channel) return 0;
+  let edited = 0;
+  try {
+    const messages = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+    if (!messages) return 0;
+    for (const msg of messages.values()) {
+      if (msg.author?.id !== client.user.id) continue;
+      const hasMeeting =
+        msg.components.some(row => row.components.some(c => c.customId === 'meeting_claim' || c.customId === 'meeting_move')) ||
+        (msg.embeds && msg.embeds.some(e => e.title && e.title.includes('STAFF MEETING')));
+      if (!hasMeeting) continue;
+      await msg
+        .edit({
+          embeds: [createStaffMeetingEmbed({ closed: true, hostedBy: 'Phalestine' })],
+          components: [createMeetingButtonRow({ disabled: true })]
+        })
+        .catch(() => null);
+      edited += 1;
+    }
+  } catch (err) {
+    console.error('Failed editing meeting messages:', err);
+  }
+  return edited;
 }
 
 async function findExistingMeetingMessage(channel) {
@@ -1788,20 +1816,33 @@ client.on('messageCreate', async message => {
       `The staff meeting has been closed. Thank you for attending!`;
 
     await message.channel.send(announcement).catch(() => null);
-    await message.channel
-      .send({
-        embeds: [createStaffMeetingEmbed({ closed: true, hostedBy: 'Phalestine' })],
-        components: [createMeetingButtonRow()]
-      })
-      .catch(() => null);
+
+    let editedCount = 0;
+    editedCount += await editMeetingMessagesToClosed(message.channel);
+    if (MEETING_CHANNEL_ID && MEETING_CHANNEL_ID !== message.channel.id) {
+      const meetingChannel = await client.channels.fetch(MEETING_CHANNEL_ID).catch(() => null);
+      if (meetingChannel && meetingChannel.isTextBased()) {
+        editedCount += await editMeetingMessagesToClosed(meetingChannel);
+      }
+    }
+
+    if (editedCount === 0) {
+      await message.channel
+        .send({
+          embeds: [createStaffMeetingEmbed({ closed: true, hostedBy: 'Phalestine' })],
+          components: [createMeetingButtonRow({ disabled: true })]
+        })
+        .catch(() => null);
+    }
+
     await sendStaffLog({
       action: '🔒 Meeting Closed',
       applicantUser: { tag: `<@${message.author.id}>`, username: message.author.username },
       applicantId: message.author.id,
       staffUser: message.author,
-      details: `Closed the staff meeting in <#${message.channel.id}>`
+      details: `Closed the staff meeting in <#${message.channel.id}> (${editedCount} embed(s) updated)`
     }).catch(() => null);
-    return message.reply('✅ Staff meeting closed.');
+    return message.reply(`✅ Staff meeting closed. Updated ${editedCount} meeting embed(s).`);
   }
 
   if (
