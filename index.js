@@ -157,6 +157,7 @@ const APPLICATIONS_CHANNEL_ID = process.env.APPLICATIONS_CHANNEL_ID || process.e
 const APPLY_MESSAGE_CHANNEL_ID = process.env.APPLY_MESSAGE_CHANNEL_ID || process.env.APPLY_CHANNEL_ID;
 const APPLY_LOG_CHANNEL_ID = process.env.APPLY_LOG_CHANNEL_ID;
 const EVENT_APPLICATION_LOG_CHANNEL_ID = process.env.EVENT_APPLICATION_LOG_CHANNEL_ID || process.env.EVENT_APPLY_LOG_CHANNEL_ID || '1536969703329763358';
+const EVENT_APPLICATIONS_CHANNEL_ID = process.env.EVENT_APPLICATIONS_CHANNEL_ID || EVENT_APPLICATION_LOG_CHANNEL_ID;
 const CLAN_LEADER_ROLE_ID = process.env.CLAN_LEADER_ROLE_ID;
 const AV_FAMILY_ROLE_ID = process.env.AV_FAMILY_ROLE_ID || process.env.ACCEPT_ROLE_ID;
 const TEST_VOICE_CHANNEL_ID = process.env.TEST_VOICE_CHANNEL_ID;
@@ -357,7 +358,8 @@ async function hasDuplicateApplicationMessage(channel, applicantId, applicationN
     return [...messages.values()].some(msg => {
       const embed = msg.embeds[0];
       if (!embed) return false;
-      const titleMatch = embed.title?.match(/application\s*#(\d+)/i);
+      // Title may be "Application #12" or "Event Application #12"
+      const titleMatch = embed.title?.match(/(?:event\s+)?application\s*#(\d+)/i);
       const footerMatch = embed.footer?.text?.match(/(\d{17,19})/);
       const existingNumber = titleMatch ? Number(titleMatch[1]) : null;
       const existingApplicantId = footerMatch ? footerMatch[1] : null;
@@ -416,10 +418,10 @@ function extractApplicationNumberFromCustomId(customId) {
 function extractApplicationNumberFromMessage(message) {
   const embed = message?.embeds?.[0];
   const title = embed?.title || '';
-  const titleMatch = title.match(/application\s*#(\d+)/i);
+  const titleMatch = title.match(/(?:event\s+)?application\s*#(\d+)/i);
   if (titleMatch) return Number(titleMatch[1]);
   const footerText = embed?.footer?.text || '';
-  const footerMatch = footerText.match(/application\s*#(\d+)/i);
+  const footerMatch = footerText.match(/(?:event\s+)?application\s*#(\d+)/i);
   if (footerMatch) return Number(footerMatch[1]);
   return null;
 }
@@ -613,12 +615,15 @@ function extractApplicantInfo(customId, message) {
   return { applicantId, applicationNumber };
 }
 
-function isEventApplicationMessage(message) {
-  const embed = message?.embeds?.[0];
+function isEventApplicationEmbed(embed) {
   if (!embed) return false;
   const title = embed.title || '';
   const description = embed.description || '';
   return /event\s*application/i.test(title) || description.includes('**Event Application**');
+}
+
+function isEventApplicationMessage(message) {
+  return isEventApplicationEmbed(message?.embeds?.[0]);
 }
 
 function eventLogChannelId(message) {
@@ -744,15 +749,20 @@ async function fetchChannelMessages(channel, limit = 200) {
   return collected;
 }
 
-async function removeUserApplicationMessages(channel, targetUserId) {
+async function removeUserApplicationMessages(channel, targetUserId, { eventOnly = null } = {}) {
   if (!channel || !channel.isTextBased()) return 0;
   try {
     const messages = await fetchChannelMessages(channel, 500);
     const toDelete = Array.from(messages.values()).filter(msg => {
       if (msg.author?.id !== client.user.id) return false;
-      const footerText = msg.embeds?.[0]?.footer?.text || '';
+      const embed = msg.embeds?.[0];
+      if (!embed) return false;
+      const footerText = embed.footer?.text || '';
       const applicantId = footerText.match(/(\d{17,19})/)?.[1];
-      return applicantId === targetUserId;
+      if (applicantId !== targetUserId) return false;
+      if (eventOnly === true && !isEventApplicationEmbed(embed)) return false;
+      if (eventOnly === false && isEventApplicationEmbed(embed)) return false;
+      return true;
     });
 
     for (const msg of toDelete) {
@@ -1425,13 +1435,13 @@ client.on('interactionCreate', async interaction => {
           const age = interaction.fields.getTextInputValue('apply_age');
           const playStyle = interaction.fields.getTextInputValue('apply_play_style');
           const gameId = interaction.fields.getTextInputValue('apply_game_id');
-          submissionHash = createSubmissionHash(interaction.user.id, { name, age, playStyle, gameId });
+          submissionHash = createSubmissionHash(interaction.user.id, { type: 'clan', name, age, playStyle, gameId });
           embedDescription = `**Name:** ${name}\n**Age:** ${age}\n**Apostado or eSports:** ${playStyle}\n**Game ID:** ${gameId}`;
         } else {
           const sqName = interaction.fields.getTextInputValue('event_sq_name');
           const sqSize = interaction.fields.getTextInputValue('event_sq_size');
           const details = interaction.fields.getTextInputValue('event_additional_info');
-          submissionHash = createSubmissionHash(interaction.user.id, { sqName, sqSize, details });
+          submissionHash = createSubmissionHash(interaction.user.id, { type: 'event', sqName, sqSize, details });
           embedDescription = `**Event Application**\n**SQ Name:** ${sqName}\n**SQ Size:** ${sqSize}\n**Additional Info:** ${details || 'None'}`;
         }
 
@@ -1504,8 +1514,9 @@ client.on('interactionCreate', async interaction => {
             .setStyle(ButtonStyle.Primary)
         );
 
-        const applicationsChannel = APPLICATIONS_CHANNEL_ID
-          ? await client.channels.fetch(APPLICATIONS_CHANNEL_ID).catch(() => null)
+        const desiredChannelId = isEventForm ? EVENT_APPLICATIONS_CHANNEL_ID : APPLICATIONS_CHANNEL_ID;
+        const applicationsChannel = desiredChannelId
+          ? await client.channels.fetch(desiredChannelId).catch(() => null)
           : null;
         const roleMention = CLAN_LEADER_ROLE_ID ? `<@&${CLAN_LEADER_ROLE_ID}>` : '';
         const targetChannel = applicationsChannel && applicationsChannel.isTextBased()
@@ -1842,27 +1853,32 @@ client.on('messageCreate', async message => {
       return message.reply('🚫 يمكنك فقط إعادة التقديم عن نفسك أو اطلب من الإدارة استخدام الأمر لآخرين.');
     }
 
-    const removedHashes = removeUserSubmittedApplicationHashes(targetId);
-    const applicationsChannel = APPLICATIONS_CHANNEL_ID
-      ? await client.channels.fetch(APPLICATIONS_CHANNEL_ID).catch(() => null)
-      : null;
-    const targetChannel = applicationsChannel && applicationsChannel.isTextBased()
-      ? applicationsChannel
-      : null;
+    // Scope: both (default) | clan | event
+    const scopeArg = (args[2] || 'both').toLowerCase();
+    if (!['both', 'clan', 'event'].includes(scopeArg)) {
+      return message.reply('❌ استخدم: `&applyagain <userid> [clan|event|both]`');
+    }
+    const wantClan = scopeArg === 'both' || scopeArg === 'clan';
+    const wantEvent = scopeArg === 'both' || scopeArg === 'event';
+    const eventOnly = scopeArg === 'event' ? true : (scopeArg === 'clan' ? false : null);
 
+    const removedHashes = removeUserSubmittedApplicationHashes(targetId);
+
+    const channelIds = [];
+    if (wantClan) channelIds.push(APPLICATIONS_CHANNEL_ID);
+    if (wantEvent) channelIds.push(EVENT_APPLICATIONS_CHANNEL_ID);
+    channelIds.push(APPLY_MESSAGE_CHANNEL_ID, APPLY_LOG_CHANNEL_ID, EVENT_APPLICATION_LOG_CHANNEL_ID, message.channel?.id);
+
+    const seen = new Set();
     let removedMessages = 0;
-    if (targetChannel) {
-      removedMessages += await removeUserApplicationMessages(targetChannel, targetId);
-    }
-    if (message.channel && message.channel.isTextBased() && message.channel.id !== targetChannel?.id) {
-      removedMessages += await removeUserApplicationMessages(message.channel, targetId);
-    }
-    // Also clean any other channels that may hold this user's application posts
-    for (const channelId of [APPLY_MESSAGE_CHANNEL_ID, APPLY_LOG_CHANNEL_ID]) {
-      if (!channelId || channelId === targetChannel?.id || channelId === message.channel?.id) continue;
-      const otherChannel = await client.channels.fetch(channelId).catch(() => null);
-      if (otherChannel && otherChannel.isTextBased()) {
-        removedMessages += await removeUserApplicationMessages(otherChannel, targetId);
+    for (const channelId of channelIds) {
+      if (!channelId || seen.has(channelId)) continue;
+      seen.add(channelId);
+      const ch = channelId === message.channel?.id
+        ? message.channel
+        : await client.channels.fetch(channelId).catch(() => null);
+      if (ch && ch.isTextBased()) {
+        removedMessages += await removeUserApplicationMessages(ch, targetId, { eventOnly });
       }
     }
 
@@ -1873,11 +1889,12 @@ client.on('messageCreate', async message => {
       saveBlacklistedUsers();
     }
 
+    const scopeLabel = scopeArg === 'both' ? '' : ` (${scopeArg})`;
     if (removedHashes > 0 || removedMessages > 0) {
-      return message.reply(`✅ تم حذف ${removedHashes} طلب سابق و${removedMessages} رسالة مكررة. يمكنك التقديم مرة أخرى الآن.`);
+      return message.reply(`✅ تم حذف ${removedHashes} طلب سابق و${removedMessages} رسالة مكررة${scopeLabel}. يمكنك التقديم مرة أخرى الآن.`);
     }
 
-    return message.reply('✅ لم يتم العثور على طلب سابق، لكن تمت إعادة تعيين حالة التقديم. يمكنك المحاولة مرة أخرى الآن.');
+    return message.reply(`✅ لم يتم العثور على طلب سابق${scopeLabel}، لكن تمت إعادة تعيين حالة التقديم. يمكنك المحاولة مرة أخرى الآن.`);
   }
 
   if (content.toLowerCase().startsWith('&apply')) {
