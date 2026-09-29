@@ -158,6 +158,9 @@ const APPLY_MESSAGE_CHANNEL_ID = process.env.APPLY_MESSAGE_CHANNEL_ID || process
 const APPLY_LOG_CHANNEL_ID = process.env.APPLY_LOG_CHANNEL_ID;
 const EVENT_APPLICATION_LOG_CHANNEL_ID = process.env.EVENT_APPLICATION_LOG_CHANNEL_ID || process.env.EVENT_APPLY_LOG_CHANNEL_ID || '1536969703329763358';
 const EVENT_APPLICATIONS_CHANNEL_ID = process.env.EVENT_APPLICATIONS_CHANNEL_ID || EVENT_APPLICATION_LOG_CHANNEL_ID;
+const STANDARD_GIF_PATH = path.join(__dirname, 'assets', 'standard.gif');
+const STANDARD_GIF_EXISTS = fs.existsSync(STANDARD_GIF_PATH);
+const STANDARD_GIF_URL = STANDARD_GIF_EXISTS ? `attachment://standard.gif` : null;
 const CLAN_LEADER_ROLE_ID = process.env.CLAN_LEADER_ROLE_ID;
 const AV_FAMILY_ROLE_ID = process.env.AV_FAMILY_ROLE_ID || process.env.ACCEPT_ROLE_ID;
 const TEST_VOICE_CHANNEL_ID = process.env.TEST_VOICE_CHANNEL_ID;
@@ -391,7 +394,7 @@ async function ensureApplyMessageButtons(message) {
   if (!message || !message.edit) return;
   try {
     const row = createApplyButtonRow();
-    await message.edit({ components: [row] });
+    await message.edit(withStandardGif({ embeds: [createApplyEmbed()], components: [row] }));
   } catch (err) {
     console.error('Failed to ensure apply message buttons:', err);
   }
@@ -486,6 +489,7 @@ async function sendStaffLog({ action, applicantUser, applicantId, staffUser, det
 
 async function safeChannelSend(channel, payload, dedupeKey) {
   if (!channel || !channel.isTextBased()) return null;
+  withStandardGif(payload);
   try {
     const key = `${channel.id}:${dedupeKey || JSON.stringify(payload).slice(0, 200)}`;
     const now = Date.now();
@@ -543,8 +547,27 @@ function createApplyModal() {
   return modal;
 }
 
+function applyStandardGif(embed) {
+  if (!embed || !STANDARD_GIF_URL) return embed;
+  return embed.setImage(STANDARD_GIF_URL);
+}
+
+function standardGifFiles() {
+  if (!STANDARD_GIF_EXISTS) return undefined;
+  return [{ attachment: STANDARD_GIF_PATH, name: 'standard.gif' }];
+}
+
+// Embed builders created by this bot already carry the GIF via applyStandardGif,
+// so this only needs to attach the file for the message payload.
+function withStandardGif(payload) {
+  if (!payload) return payload;
+  const files = standardGifFiles();
+  if (files) payload.files = files;
+  return payload;
+}
+
 function createApplyEmbed() {
-  return new EmbedBuilder()
+  return applyStandardGif(new EmbedBuilder()
     .setColor('Blue')
     .setTitle('🛡️ AVENGERS APPLICATION')
     .setDescription(
@@ -555,7 +578,7 @@ function createApplyEmbed() {
       'While waiting, you can read the server rules and clan rules.\n\n' +
       'Good luck and thank you for choosing AVENGERS.'
     )
-    .setFooter({ text: 'AVENGERS' });
+    .setFooter({ text: 'AVENGERS' }));
 }
 
 function createApplyButtonRow() {
@@ -791,7 +814,7 @@ function getRoleListEmbed(roleName, onlineCount, offlineCount, members, page) {
     }).join('\n')
     : 'لا يوجد أعضاء في هذه الصفحة.';
 
-  return new EmbedBuilder()
+  return applyStandardGif(new EmbedBuilder()
     .setTitle(`Role Members: ${roleName}`)
     .setDescription(description)
     .addFields(
@@ -799,7 +822,7 @@ function getRoleListEmbed(roleName, onlineCount, offlineCount, members, page) {
       { name: 'Online Members', value: `${onlineCount}`, inline: true },
       { name: 'Offline Members', value: `${offlineCount}`, inline: true }
     )
-    .setFooter({ text: `Page ${page + 1} / ${Math.max(1, Math.ceil(total / ROLELIST_PAGE_SIZE))}` });
+    .setFooter({ text: `Page ${page + 1} / ${Math.max(1, Math.ceil(total / ROLELIST_PAGE_SIZE))}` }));
 }
 
 function createRoleListButtons(roleId, currentPage, totalPages) {
@@ -843,11 +866,11 @@ function createStaffMeetingEmbed({ closed = false, hostedBy = 'Phalestine', time
     (closed
       ? `\n\n🔒 **Meeting Closed**\n👤 **Hosted by:** ${hostedBy}`
       : '');
-  return new EmbedBuilder()
+  return applyStandardGif(new EmbedBuilder()
     .setTitle(closed ? '🔒 STAFF MEETING — CLOSED' : '🎙️ STAFF MEETING')
     .setDescription(description)
     .setColor(closed ? 0x992d22 : 0x9b59b6)
-    .setFooter({ text: closed ? `Hosted by ${hostedBy}` : 'AVENGERS' });
+    .setFooter({ text: closed ? `Hosted by ${hostedBy}` : 'AVENGERS' }));
 }
 
 function createMeetingButtonRow({ disabled = false } = {}) {
@@ -915,6 +938,15 @@ async function ensureMeetingMessage(channel) {
       .find(c => c.customId === 'meeting_claim');
     meetingActive = !!(claimBtn && !claimBtn.disabled);
     console.log('Meeting active state on startup:', meetingActive);
+    try {
+      const closed = claimBtn?.disabled === true;
+      await existing.edit(withStandardGif({
+        embeds: [createStaffMeetingEmbed({ closed, hostedBy: 'Phalestine' })],
+        components: [createMeetingButtonRow({ disabled: closed })]
+      }));
+    } catch (err) {
+      console.error('Failed to refresh staff meeting message:', err);
+    }
     return;
   }
   meetingActive = false;
@@ -1130,7 +1162,7 @@ client.on('interactionCreate', async interaction => {
         console.log('[ROLE DEBUG]', `processingId=${processingId}`, `interaction.id=${interaction.id}`, `user=${interaction.user.id}`, `roleId=${roleId}`, `page=${page}`, `pid=${process.pid}`);
         const beforeStack = (new Error().stack || '').split('\n').slice(2,6).map(s => s.trim()).join(' | ');
         console.log('[ROLE STACK]', beforeStack);
-        const updated = await interaction.update({ embeds: [embed], components: buttons ? [buttons] : [] }).catch(err => { console.error('[ROLE UPDATE ERROR]', err); return null; });
+        const updated = await interaction.update(withStandardGif({ embeds: [embed], components: buttons ? [buttons] : [] })).catch(err => { console.error('[ROLE UPDATE ERROR]', err); return null; });
         console.log('[ROLE UPDATED]', `interaction.id=${interaction.id}`, `processingId=${processingId}`, `result=${updated ? 'ok' : 'fail'}`, `pid=${process.pid}`);
         return updated;
       }
@@ -1489,11 +1521,11 @@ client.on('interactionCreate', async interaction => {
         saveSubmittedApplications();
 
         const isEventForm = interaction.customId === 'event_apply_form';
-        const embed = new EmbedBuilder()
+        const embed = applyStandardGif(new EmbedBuilder()
           .setColor(isEventForm ? 'Purple' : 'Blue')
           .setTitle(`${isEventForm ? '🎯 Event Application' : '📄 Application'} #${applicationNumber}`)
           .setDescription(embedDescription)
-          .setFooter({ text: `Applicant ID: ${interaction.user.id}` });
+          .setFooter({ text: `Applicant ID: ${interaction.user.id}` }));
 
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
@@ -1746,7 +1778,7 @@ client.on('messageCreate', async message => {
 
     const processingId = `${message.id || 'msg'}:${Date.now()}`;
     console.log('[ROLE REQ]', `processingId=${processingId}`, `user=${message.author.id}`, `roleId=${roleId}`, `channel=${message.channel.id}`, `pid=${process.pid}`);
-    const sent = await message.reply({ embeds: [embed], components: buttons ? [buttons] : [] });
+      const sent = await message.reply(withStandardGif({ embeds: [embed], components: buttons ? [buttons] : [] }));
     try { console.log('[ROLE SENT]', `message.id=${sent.id}`, `processingId=${processingId}`, `user=${message.author.id}`, `roleId=${roleId}`, `pid=${process.pid}`); } catch (e) {}
     return sent;
   }
@@ -1770,10 +1802,10 @@ client.on('messageCreate', async message => {
 
     await message.channel.send(announcement).catch(() => null);
     await message.channel
-      .send({
+      .send(withStandardGif({
         embeds: [createStaffMeetingEmbed({ time: timeRange || null })],
         components: [createMeetingButtonRow()]
-      })
+      }))
       .catch(() => null);
     meetingActive = true;
     await sendStaffLog({
@@ -1813,10 +1845,10 @@ client.on('messageCreate', async message => {
 
     if (editedCount === 0) {
       await message.channel
-        .send({
+        .send(withStandardGif({
           embeds: [createStaffMeetingEmbed({ closed: true, hostedBy: 'Phalestine' })],
           components: [createMeetingButtonRow({ disabled: true })]
-        })
+        }))
         .catch(() => null);
     }
     meetingActive = false;
@@ -2124,7 +2156,7 @@ client.on('messageCreate', async message => {
       .setFooter({ text: `Requested by ${message.author.tag} • AVENGERS` })
       .setTimestamp();
 
-    return message.reply({ embeds: [helpEmbed] });
+    return message.reply(withStandardGif({ embeds: [applyStandardGif(helpEmbed)] }));
   }
 });
 
