@@ -2073,6 +2073,59 @@ client.on('messageCreate', async message => {
     await safeChannelSend(message.channel, { embeds: [embed], components: [row] }, `postapply_${message.channel.id}`);
     return message.reply('✅ تم نشر رسالة التقديم هنا.');
   }
+
+  // Show every bot command and what it does
+  if (content.toLowerCase() === '!cccc' || content.toLowerCase() === '!commands' || content.toLowerCase() === '!help') {
+    const helpEmbed = new EmbedBuilder()
+      .setColor('Blurple')
+      .setTitle('📖 AVENGERS Bot — Commands')
+      .setDescription(
+        '**📋 Applications**\n' +
+        '> `تقديم` — open the clan application form (button)\n' +
+        '> `Event Apply` — open the event/SQ application form (button)\n' +
+        '> `!applyagain <userid> [clan|event|both]` — delete a user\'s previous application(s) and let them re-apply. Omit the scope to clear both.\n' +
+        '> `!applyagian <userid>` — alias of `!applyagain`\n\n' +
+        '**🎙️ Staff Meetings**\n' +
+        '> `!addmeeting` — announce a new staff meeting and post the open meeting panel\n' +
+        '> `!add meeting 12:00 - 1:00` — same, with a time range on the embed\n' +
+        '> `!close meeting` — close the meeting, edit the panel and disable the Claim button\n' +
+        '> `Claim` — claim the active meeting (button)\n' +
+        '> `Move For Meeting` — move yourself to the meeting voice room (button)\n\n' +
+        '**🎧 Voice & Roles**\n' +
+        '> `&go <channel_id>` — join a voice channel\n' +
+        '> `&go leave` — leave the current voice channel\n' +
+        '> `&rolelist <role_id>` — paginated list of a role\'s members with online/offline counts\n\n' +
+        '**🛡️ Staff Actions on Applications**\n' +
+        '> `Accept` — accept the application and give the AV Family role (button)\n' +
+        '> `Reject` — reject the application (button)\n' +
+        '> `Show Status` — show the applicant\'s online status and current voice channel (button)\n' +
+        '> `Move For Test` — move the applicant and clan leaders to the test voice room (button)'
+      )
+      .addFields(
+        {
+          name: '🧹 Admin Commands',
+          value:
+            '> `!postapply` — post the apply panel in the current channel\n' +
+            '> `!clear applications` — delete all bot applications in the applications channel\n' +
+            '> `!clear apply log` — delete all application log messages\n' +
+            '> `!dedupeapply` — remove duplicate apply panels\n' +
+            '> `!blacklist <userid>` — block a user from applying permanently\n' +
+            '> `!unblacklist <userid>` — lift a temporary apply block\n' +
+            '> `&apply <userid>` — lift a temporary apply block for a user'
+        },
+        {
+          name: '📌 Notes',
+          value:
+            '• Clan applications and event applications are **separate** — you can apply to both.\n' +
+            '• The duplicate check only blocks the *same* application being sent twice.\n' +
+            '• Admin commands require **Administrator** or **Manage Server** permission.'
+        }
+      )
+      .setFooter({ text: `Requested by ${message.author.tag} • AVENGERS` })
+      .setTimestamp();
+
+    return message.reply({ embeds: [helpEmbed] });
+  }
 });
 
 const rawToken = process.env.DISCORD_TOKEN || process.env.TOKEN || '';
