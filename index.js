@@ -157,7 +157,6 @@ const APPLICATIONS_CHANNEL_ID = process.env.APPLICATIONS_CHANNEL_ID || process.e
 const APPLY_MESSAGE_CHANNEL_ID = process.env.APPLY_MESSAGE_CHANNEL_ID || process.env.APPLY_CHANNEL_ID;
 const APPLY_LOG_CHANNEL_ID = process.env.APPLY_LOG_CHANNEL_ID;
 const EVENT_APPLICATION_LOG_CHANNEL_ID = process.env.EVENT_APPLICATION_LOG_CHANNEL_ID || process.env.EVENT_APPLY_LOG_CHANNEL_ID || '1536969703329763358';
-const TERM_F_APPLICATION_LOG_CHANNEL_ID = process.env.TERM_F_APPLICATION_LOG_CHANNEL_ID || process.env.TERM_F_APPLY_LOG_CHANNEL_ID || null;
 const CLAN_LEADER_ROLE_ID = process.env.CLAN_LEADER_ROLE_ID;
 const AV_FAMILY_ROLE_ID = process.env.AV_FAMILY_ROLE_ID || process.env.ACCEPT_ROLE_ID;
 const TEST_VOICE_CHANNEL_ID = process.env.TEST_VOICE_CHANNEL_ID;
@@ -568,11 +567,6 @@ function createApplyButtonRow() {
       .setCustomId('event_apply')
       .setLabel('Event Apply')
       .setEmoji('🎯')
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId('term_f_apply')
-      .setLabel('Term F')
-      .setEmoji('📋')
       .setStyle(ButtonStyle.Primary)
   );
 }
@@ -604,38 +598,6 @@ function createEventApplyModal() {
     new ActionRowBuilder().addComponents(sqNameInput),
     new ActionRowBuilder().addComponents(sqSizeInput),
     new ActionRowBuilder().addComponents(detailsInput)
-  );
-
-  return modal;
-}
-
-function createTermFApplyModal() {
-  const modal = new ModalBuilder()
-    .setCustomId('term_f_apply_form')
-    .setTitle('تقديم للـ Term F');
-
-  const termNameInput = new TextInputBuilder()
-    .setCustomId('term_f_name')
-    .setLabel('الاسم')
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true);
-
-  const termDaysInput = new TextInputBuilder()
-    .setCustomId('term_f_days')
-    .setLabel('عدد أيام Term F')
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true);
-
-  const termDetailsInput = new TextInputBuilder()
-    .setCustomId('term_f_details')
-    .setLabel('معلومات إضافية للتقديم')
-    .setStyle(TextInputStyle.Paragraph)
-    .setRequired(false);
-
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(termNameInput),
-    new ActionRowBuilder().addComponents(termDaysInput),
-    new ActionRowBuilder().addComponents(termDetailsInput)
   );
 
   return modal;
@@ -1081,7 +1043,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.isButton()) {
       const customId = interaction.customId;
 
-      if (customId === 'apply' || customId === 'event_apply' || customId === 'term_f_apply') {
+      if (customId === 'apply' || customId === 'event_apply') {
         const userId = interaction.user.id;
         const now = Date.now();
 
@@ -1109,8 +1071,6 @@ client.on('interactionCreate', async interaction => {
 
         if (customId === 'apply') {
           await interaction.showModal(createApplyModal());
-        } else if (customId === 'term_f_apply') {
-          await interaction.showModal(createTermFApplyModal());
         } else {
           await interaction.showModal(createEventApplyModal());
         }
@@ -1436,7 +1396,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.isModalSubmit()) {
-      if (interaction.customId === 'apply_form' || interaction.customId === 'event_apply_form' || interaction.customId === 'term_f_apply_form') {
+      if (interaction.customId === 'apply_form' || interaction.customId === 'event_apply_form') {
         const interactionId = interaction.id || `${interaction.user.id}_${Date.now()}`;
         let embedDescription;
         let submissionHash;
@@ -1448,12 +1408,6 @@ client.on('interactionCreate', async interaction => {
           const gameId = interaction.fields.getTextInputValue('apply_game_id');
           submissionHash = createSubmissionHash(interaction.user.id, { name, age, playStyle, gameId });
           embedDescription = `**Name:** ${name}\n**Age:** ${age}\n**Apostado or eSports:** ${playStyle}\n**Game ID:** ${gameId}`;
-        } else if (interaction.customId === 'term_f_apply_form') {
-          const termName = interaction.fields.getTextInputValue('term_f_name');
-          const termDays = interaction.fields.getTextInputValue('term_f_days');
-          const termDetails = interaction.fields.getTextInputValue('term_f_details');
-          submissionHash = createSubmissionHash(interaction.user.id, { termName, termDays, termDetails });
-          embedDescription = `**Term F Application**\n**الاسم:** ${termName}\n**عدد أيام Term F:** ${termDays}\n**Additional Info:** ${termDetails || 'None'}`;
         } else {
           const sqName = interaction.fields.getTextInputValue('event_sq_name');
           const sqSize = interaction.fields.getTextInputValue('event_sq_size');
@@ -1576,19 +1530,13 @@ client.on('interactionCreate', async interaction => {
         }
 
         await sendStaffLog({
-          action: interaction.customId === 'event_apply_form' ? '📝 Event Application Submitted'
-            : interaction.customId === 'term_f_apply_form' ? '📝 Term F Application Submitted'
-            : '📝 Application Submitted',
+          action: interaction.customId === 'event_apply_form' ? '📝 Event Application Submitted' : '📝 Application Submitted',
           applicantUser: interaction.user,
           applicantId: interaction.user.id,
           staffUser: { tag: 'System', username: 'System' },
-          details: interaction.customId === 'event_apply_form' ? 'Event application submitted'
-            : interaction.customId === 'term_f_apply_form' ? 'Term F application submitted'
-            : 'Application submitted',
+          details: interaction.customId === 'event_apply_form' ? 'Event application submitted' : 'Application submitted',
           applicationNumber,
-          logChannelId: interaction.customId === 'event_apply_form' ? EVENT_APPLICATION_LOG_CHANNEL_ID
-            : interaction.customId === 'term_f_apply_form' ? TERM_F_APPLICATION_LOG_CHANNEL_ID
-            : undefined
+          logChannelId: interaction.customId === 'event_apply_form' ? EVENT_APPLICATION_LOG_CHANNEL_ID : undefined
         }).catch(() => null);
 
         return await interaction.editReply({
