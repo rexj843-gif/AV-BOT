@@ -362,7 +362,7 @@ async function hasDuplicateApplicationMessage(channel, applicantId, applicationN
       const footerMatch = embed.footer?.text?.match(/(\d{17,19})/);
       const existingNumber = titleMatch ? Number(titleMatch[1]) : null;
       const existingApplicantId = footerMatch ? footerMatch[1] : null;
-      return existingNumber === applicationNumber || existingApplicantId === applicantId;
+      return existingApplicantId === applicantId && existingNumber === applicationNumber;
     });
   } catch (err) {
     console.error('Failed to check duplicate application message:', err);
@@ -1888,6 +1888,14 @@ client.on('messageCreate', async message => {
     }
     if (message.channel && message.channel.isTextBased() && message.channel.id !== targetChannel?.id) {
       removedMessages += await removeUserApplicationMessages(message.channel, targetId);
+    }
+    // Also clean any other channels that may hold this user's application posts
+    for (const channelId of [APPLY_MESSAGE_CHANNEL_ID, APPLY_LOG_CHANNEL_ID]) {
+      if (!channelId || channelId === targetChannel?.id || channelId === message.channel?.id) continue;
+      const otherChannel = await client.channels.fetch(channelId).catch(() => null);
+      if (otherChannel && otherChannel.isTextBased()) {
+        removedMessages += await removeUserApplicationMessages(otherChannel, targetId);
+      }
     }
 
     applyAttempts.delete(targetId);
