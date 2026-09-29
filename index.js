@@ -158,6 +158,7 @@ const APPLY_MESSAGE_CHANNEL_ID = process.env.APPLY_MESSAGE_CHANNEL_ID || process
 const APPLY_LOG_CHANNEL_ID = process.env.APPLY_LOG_CHANNEL_ID;
 const EVENT_APPLICATION_LOG_CHANNEL_ID = process.env.EVENT_APPLICATION_LOG_CHANNEL_ID || process.env.EVENT_APPLY_LOG_CHANNEL_ID || '1536969703329763358';
 const EVENT_APPLICATIONS_CHANNEL_ID = process.env.EVENT_APPLICATIONS_CHANNEL_ID || EVENT_APPLICATION_LOG_CHANNEL_ID;
+const EMBED_COLOR_RED = 0x992d22;
 const STANDARD_GIF_PATH = path.join(__dirname, 'assets', 'standard.gif');
 const STANDARD_GIF_EXISTS = fs.existsSync(STANDARD_GIF_PATH);
 const STANDARD_GIF_URL = STANDARD_GIF_EXISTS ? `attachment://standard.gif` : null;
@@ -568,7 +569,7 @@ function withStandardGif(payload) {
 
 function createApplyEmbed() {
   return applyStandardGif(new EmbedBuilder()
-    .setColor('Blue')
+    .setColor(EMBED_COLOR_RED)
     .setTitle('🛡️ AVENGERS APPLICATION')
     .setDescription(
       'Click the Apply button below to submit your application.\n\n' +
@@ -815,6 +816,7 @@ function getRoleListEmbed(roleName, onlineCount, offlineCount, members, page) {
     : 'لا يوجد أعضاء في هذه الصفحة.';
 
   return applyStandardGif(new EmbedBuilder()
+    .setColor(EMBED_COLOR_RED)
     .setTitle(`Role Members: ${roleName}`)
     .setDescription(description)
     .addFields(
@@ -869,7 +871,7 @@ function createStaffMeetingEmbed({ closed = false, hostedBy = 'Phalestine', time
   return applyStandardGif(new EmbedBuilder()
     .setTitle(closed ? '🔒 STAFF MEETING — CLOSED' : '🎙️ STAFF MEETING')
     .setDescription(description)
-    .setColor(closed ? 0x992d22 : 0x9b59b6)
+    .setColor(EMBED_COLOR_RED)
     .setFooter({ text: closed ? `Hosted by ${hostedBy}` : 'AVENGERS' }));
 }
 
@@ -1522,7 +1524,7 @@ client.on('interactionCreate', async interaction => {
 
         const isEventForm = interaction.customId === 'event_apply_form';
         const embed = applyStandardGif(new EmbedBuilder()
-          .setColor(isEventForm ? 'Purple' : 'Blue')
+          .setColor(EMBED_COLOR_RED)
           .setTitle(`${isEventForm ? '🎯 Event Application' : '📄 Application'} #${applicationNumber}`)
           .setDescription(embedDescription)
           .setFooter({ text: `Applicant ID: ${interaction.user.id}` }));
@@ -2109,7 +2111,7 @@ client.on('messageCreate', async message => {
   // Show every bot command and what it does
   if (content.toLowerCase() === '!cccc' || content.toLowerCase() === '!commands' || content.toLowerCase() === '!help') {
     const helpEmbed = new EmbedBuilder()
-      .setColor('Blurple')
+      .setColor(EMBED_COLOR_RED)
       .setTitle('📖 AVENGERS Bot — Commands')
       .setDescription(
         '**📋 Applications**\n' +
