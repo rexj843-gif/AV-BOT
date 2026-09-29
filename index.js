@@ -613,6 +613,18 @@ function extractApplicantInfo(customId, message) {
   return { applicantId, applicationNumber };
 }
 
+function isEventApplicationMessage(message) {
+  const embed = message?.embeds?.[0];
+  if (!embed) return false;
+  const title = embed.title || '';
+  const description = embed.description || '';
+  return /event\s*application/i.test(title) || description.includes('**Event Application**');
+}
+
+function eventLogChannelId(message) {
+  return isEventApplicationMessage(message) ? (EVENT_APPLICATION_LOG_CHANNEL_ID || null) : null;
+}
+
 function hasAdminPermissions(member) {
   return member && member.permissions.has(PermissionsBitField.Flags.Administrator);
 }
@@ -1165,7 +1177,8 @@ client.on('interactionCreate', async interaction => {
           applicantId,
           staffUser: interaction.user,
           details: roleAdded ? 'Accepted and role assigned' : `Accepted with error: ${roleAssignError}`,
-          applicationNumber
+          applicationNumber,
+          logChannelId: eventLogChannelId(interaction.message)
         }).catch(() => null);
 
         return;
@@ -1186,7 +1199,8 @@ client.on('interactionCreate', async interaction => {
           applicantId,
           staffUser: interaction.user,
           details: 'Rejected',
-          applicationNumber
+          applicationNumber,
+          logChannelId: eventLogChannelId(interaction.message)
         }).catch(() => null);
 
         return;
@@ -1227,15 +1241,17 @@ client.on('interactionCreate', async interaction => {
           applicantId: member.id,
           staffUser: interaction.user,
           details: 'Show Status used',
-          applicationNumber
+          applicationNumber,
+          logChannelId: eventLogChannelId(interaction.message)
         }).catch(() => null);
 
         if (voiceChannel) {
           // Only include Move button when the member is in a voice channel
+          const isEvent = isEventApplicationMessage(interaction.message);
           replyPayload.components = [
             new ActionRowBuilder().addComponents(
               new ButtonBuilder()
-                .setCustomId(`move_${member.id}_${applicationNumber}`)
+                .setCustomId(`move_${member.id}_${applicationNumber}${isEvent ? '_event' : ''}`)
                 .setLabel('Move For Test')
                 .setEmoji('🎧')
                 .setStyle(ButtonStyle.Success)
@@ -1316,7 +1332,10 @@ client.on('interactionCreate', async interaction => {
           applicantId: member.id,
           staffUser: interaction.user,
           details: 'Moved to Test Voice',
-          applicationNumber: extractApplicationNumberFromCustomId(customId) || extractApplicationNumberFromMessage(interaction.message)
+          applicationNumber: extractApplicationNumberFromCustomId(customId) || extractApplicationNumberFromMessage(interaction.message),
+          logChannelId: customId.endsWith('_event') || isEventApplicationMessage(interaction.message)
+            ? (EVENT_APPLICATION_LOG_CHANNEL_ID || null)
+            : null
         }).catch(() => null);
 
         return interaction.editReply({
@@ -1459,9 +1478,10 @@ client.on('interactionCreate', async interaction => {
         submittedApplications.byUser.set(interaction.user.id, userHashes);
         saveSubmittedApplications();
 
+        const isEventForm = interaction.customId === 'event_apply_form';
         const embed = new EmbedBuilder()
-          .setColor('Blue')
-          .setTitle(`📄 Application #${applicationNumber}`)
+          .setColor(isEventForm ? 'Purple' : 'Blue')
+          .setTitle(`${isEventForm ? '🎯 Event Application' : '📄 Application'} #${applicationNumber}`)
           .setDescription(embedDescription)
           .setFooter({ text: `Applicant ID: ${interaction.user.id}` });
 
