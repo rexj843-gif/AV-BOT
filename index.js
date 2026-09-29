@@ -162,6 +162,9 @@ const EMBED_COLOR_RED = 0x992d22;
 const STANDARD_GIF_PATH = path.join(__dirname, 'assets', 'standard.gif');
 const STANDARD_GIF_EXISTS = fs.existsSync(STANDARD_GIF_PATH);
 const STANDARD_GIF_URL = STANDARD_GIF_EXISTS ? `attachment://standard.gif` : null;
+const ACCEPTED_GIF_PATH = path.join(__dirname, 'assets', 'accepted.gif');
+const ACCEPTED_GIF_EXISTS = fs.existsSync(ACCEPTED_GIF_PATH);
+const ACCEPTED_GIF_URL = ACCEPTED_GIF_EXISTS ? `attachment://accepted.gif` : null;
 const CLAN_LEADER_ROLE_ID = process.env.CLAN_LEADER_ROLE_ID;
 const AV_FAMILY_ROLE_ID = process.env.AV_FAMILY_ROLE_ID || process.env.ACCEPT_ROLE_ID;
 const TEST_VOICE_CHANNEL_ID = process.env.TEST_VOICE_CHANNEL_ID;
@@ -551,6 +554,52 @@ function createApplyModal() {
 function applyStandardGif(embed) {
   if (!embed || !STANDARD_GIF_URL) return embed;
   return embed.setImage(STANDARD_GIF_URL);
+}
+
+function applyAcceptedGif(embed) {
+  if (!embed || !ACCEPTED_GIF_URL) return embed;
+  return embed.setImage(ACCEPTED_GIF_URL);
+}
+
+function acceptedGifFiles() {
+  if (!ACCEPTED_GIF_EXISTS) return undefined;
+  return [{ attachment: ACCEPTED_GIF_PATH, name: 'accepted.gif' }];
+}
+
+function createAcceptedEmbed({ applicantTag, applicationNumber, roleAdded, guildName }) {
+  return applyAcceptedGif(new EmbedBuilder()
+    .setColor(roleAdded ? 0x00ff00 : 0x992d22)
+    .setTitle('🎉 Your application has been accepted!')
+    .setDescription(
+      (roleAdded
+        ? `Welcome to **${guildName || 'AVENGERS'}**, ${applicantTag}! 🎊\n\n` +
+          'Your application was reviewed by the staff and you have been accepted into the clan.\n\n' +
+          'The **AV Family** role has been granted to your account, and you can now take part in all clan activities.\n\n'
+        : `Your application was accepted${guildName ? ` for **${guildName}**` : ''}, ${applicantTag}.\n\n` +
+          'However, there was a problem granting your role. Please contact a staff member to fix it.\n\n') +
+      'Please read the clan rules and channels to get started. Thank you for choosing us!'
+    )
+    .addFields(
+      { name: 'Applicant', value: `${applicantTag || 'Unknown'}`, inline: true },
+      { name: 'Application', value: applicationNumber ? `#${applicationNumber}` : 'N/A', inline: true }
+    )
+    .setFooter({ text: `Welcome to ${guildName || 'AVENGERS'} • Thank you for applying!` })
+    .setTimestamp());
+}
+
+async function sendAcceptDm({ user, applicantTag, applicationNumber, roleAdded, guildName }) {
+  if (!user || !user.send) return { sent: false, reason: 'no_user' };
+  try {
+    const files = acceptedGifFiles();
+    const payload = { embeds: [createAcceptedEmbed({ applicantTag: applicantTag || user.tag, applicationNumber, roleAdded, guildName })] };
+    if (files) payload.files = files;
+    await user.send(payload);
+    return { sent: true };
+  } catch (err) {
+    const reason = err && err.code === 50007 ? 'dms_closed' : (err?.message || 'unknown_error');
+    console.error(`[ACCEPT DM FAILED] user=${user.id} reason=${reason}`);
+    return { sent: false, reason };
+  }
 }
 
 function standardGifFiles() {
@@ -1215,12 +1264,26 @@ client.on('interactionCreate', async interaction => {
 
         applicantTag = applicantMember?.user?.tag || applicantTag;
 
+        let dmResult = { sent: false, reason: 'no_user' };
+        if (applicantMember?.user) {
+          dmResult = await sendAcceptDm({
+            user: applicantMember.user,
+            applicantTag,
+            applicationNumber,
+            roleAdded,
+            guildName: interaction.guild?.name
+          });
+        }
+        console.log('[ACCEPT DM]', `applicantId=${applicantId || 'none'}`, `applicationNumber=${applicationNumber || 'none'}`, `roleAdded=${roleAdded}`, `dmSent=${dmResult.sent}`, `reason=${dmResult.reason}`);
+
         await sendStaffLog({
           action: '✅ Accepted',
           applicantUser: applicantMember?.user || { tag: applicantTag || 'Unknown', username: applicantTag || 'Unknown' },
           applicantId,
           staffUser: interaction.user,
-          details: roleAdded ? 'Accepted and role assigned' : `Accepted with error: ${roleAssignError}`,
+          details: roleAdded
+            ? `Accepted and role assigned${dmResult.sent ? ' • DM sent' : ` • DM failed (${dmResult.reason})`}`
+            : `Accepted with error: ${roleAssignError}${dmResult.sent ? ' • DM sent' : ` • DM failed (${dmResult.reason})`}`,
           applicationNumber,
           logChannelId: eventLogChannelId(interaction.message)
         }).catch(() => null);
@@ -1970,6 +2033,33 @@ client.on('messageCreate', async message => {
       return;
     }
 
+    // Resend the acceptance DM to a user (useful if their DMs were closed on accept)
+    if (args[2] && args[2].toLowerCase() === 'dm') {
+      const targetId = args[1].replace(/[<@!>]/g, '');
+      if (!/^\d{17,19}$/.test(targetId)) {
+        return message.reply('❌ الرجاء إدخال معرف مستخدم صالح.');
+      }
+      const targetUser = await client.users.fetch(targetId).catch(() => null);
+      if (!targetUser) {
+        return message.reply('❌ لم يتم العثور على المستخدم.');
+      }
+      const member = await message.guild?.members.fetch(targetId).catch(() => null);
+      const result = await sendAcceptDm({
+        user: targetUser,
+        applicantTag: targetUser.tag,
+        applicationNumber: null,
+        roleAdded: !!(member?.roles?.cache?.has(AV_FAMILY_ROLE_ID)),
+        guildName: message.guild?.name
+      });
+      if (result.sent) {
+        return message.reply(`✅ تم إرسال رسالة القبول إلى <@${targetId}> عبر DM.`);
+      }
+      if (result.reason === 'dms_closed') {
+        return message.reply('🚫 المستخدم مغلق الرسائل الخاصة (DM). لا يمكن إرساله له.');
+      }
+      return message.reply(`❌ فشل إرسال الرسالة: ${result.reason}`);
+    }
+
     const target = args[1];
     if (!target) {
       return message.reply('❌ Please provide a user mention or user ID.');
@@ -2145,6 +2235,7 @@ client.on('messageCreate', async message => {
             '> `!dedupeapply` — remove duplicate apply panels\n' +
             '> `!blacklist <userid>` — block a user from applying permanently\n' +
             '> `!unblacklist <userid>` — lift a temporary apply block\n' +
+            '> `!unblacklist <userid> dm` — resend the acceptance DM to a user\n' +
             '> `&apply <userid>` — lift a temporary apply block for a user'
         },
         {
