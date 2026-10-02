@@ -32,6 +32,7 @@ changes/fixes made to the code.
 &rolelist <ROLE_ID>
     - Shows the members of a role with online/offline status.
     - If there are more than 10 members, Previous/Next buttons appear.
+    - "End Session" button closes the list and removes the buttons.
 
 ---------------------------------------------------
  APPLICATION COMMANDS

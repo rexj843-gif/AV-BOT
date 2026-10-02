@@ -1165,22 +1165,45 @@ function getRoleListEmbed(roleName, onlineCount, offlineCount, members, page) {
 }
 
 function createRoleListButtons(roleId, currentPage, totalPages) {
-  if (totalPages <= 1) return null;
-
   const row = new ActionRowBuilder();
+
+  if (totalPages > 1) {
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`rolelist_prev_${roleId}_${Math.max(0, currentPage - 1)}`)
+        .setLabel('Previous')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(currentPage === 0),
+      new ButtonBuilder()
+        .setCustomId(`rolelist_next_${roleId}_${Math.min(totalPages - 1, currentPage + 1)}`)
+        .setLabel('Next')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(currentPage === totalPages - 1)
+    );
+  }
+
   row.addComponents(
     new ButtonBuilder()
-      .setCustomId(`rolelist_prev_${roleId}_${Math.max(0, currentPage - 1)}`)
-      .setLabel('Previous')
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(currentPage === 0),
-    new ButtonBuilder()
-      .setCustomId(`rolelist_next_${roleId}_${Math.min(totalPages - 1, currentPage + 1)}`)
-      .setLabel('Next')
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(currentPage === totalPages - 1)
+      .setCustomId(`rolelist_end_${roleId}`)
+      .setLabel('🔚 End Session')
+      .setStyle(ButtonStyle.Danger)
   );
+
   return row;
+}
+
+function buildRoleListClosedEmbed(roleName, closedBy) {
+  return applyStandardGif(new EmbedBuilder()
+    .setColor(EMBED_COLOR_RED)
+    .setTitle('🔚 Session Ended / انتهت الجلسة')
+    .setDescription(
+      'The role member list session has been closed.\n' +
+      'تم إغلاق جلسة قائمة أعضاء الـ Role.\n\n' +
+      `**Role:** ${roleName}\n` +
+      `**Closed by / بواسطة:** ${closedBy || 'Unknown'}`
+    )
+    .setFooter({ text: 'AVENGERS' })
+    .setTimestamp());
 }
 
 function parseRoleListCustomId(customId) {
@@ -1468,6 +1491,20 @@ client.on('interactionCreate', async interaction => {
           await interaction.showModal(createEventApplyModal());
         }
         return;
+      }
+
+      if (customId.startsWith('rolelist_end_')) {
+        const roleId = customId.split('_')[2];
+        const role = /^\d{17,19}$/.test(roleId || '')
+          ? (interaction.guild?.roles.cache.get(roleId) || await interaction.guild?.roles.fetch(roleId).catch(() => null))
+          : null;
+
+        console.log('[ROLELIST END]', `roleId=${roleId || 'none'}`, `user=${interaction.user.id}`, `channel=${interaction.channel.id}`);
+
+        return interaction.update({
+          embeds: [buildRoleListClosedEmbed(role?.name || 'Unknown', interaction.user.tag)],
+          components: []
+        });
       }
 
       if (customId.startsWith('rolelist_next_') || customId.startsWith('rolelist_prev_')) {
@@ -2778,7 +2815,8 @@ client.on('messageCreate', async message => {
         '**🎧 Voice & Roles**\n' +
         '> `&go <channel_id>` — join a voice channel\n' +
         '> `&go leave` — leave the current voice channel\n' +
-        '> `&rolelist <role_id>` — paginated list of a role\'s members with online/offline counts\n\n' +
+            '> `&rolelist <role_id>` — paginated list of a role\'s members with online/offline counts\n' +
+            '> `🔚 End Session` — closes the role list and removes its buttons (button)\n\n' +
         '**🛡️ Staff Actions on Applications**\n' +
         '> `Accept` — accept the application and give the AV Family role (button)\n' +
         '> `Reject` — reject the application (button)\n' +
