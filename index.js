@@ -153,6 +153,7 @@ const BLACKLIST_FILE_PATH = path.join(__dirname, 'blacklist.json');
 const APPLICATION_COUNTER_FILE_PATH = path.join(__dirname, 'application-counter.json');
 const SUBMITTED_APPLICATIONS_FILE_PATH = path.join(__dirname, 'submitted-applications.json');
 const SUBMISSION_LOCKS_DIR = path.join(__dirname, 'submission_locks');
+const TEST_TIMES_FILE_PATH = path.join(__dirname, 'test-times.json');
 const APPLICATIONS_CHANNEL_ID = process.env.APPLICATIONS_CHANNEL_ID || process.env.APPLY_CHANNEL_ID;
 const APPLY_MESSAGE_CHANNEL_ID = process.env.APPLY_MESSAGE_CHANNEL_ID || process.env.APPLY_CHANNEL_ID;
 const APPLY_LOG_CHANNEL_ID = process.env.APPLY_LOG_CHANNEL_ID;
@@ -194,16 +195,204 @@ const STAFF_MEETING_ROLES = [
 let meetingActive = false;
 
 const blacklistedUsers = loadBlacklistedUsers();
+const testTimes = loadTestTimes();
 const submittedApplications = loadSubmittedApplications();
 let nextApplicationNumber = loadNextApplicationNumber();
 const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 60 * 1000;
 const BLACKLIST_MS = 5 * 60 * 1000; // 5 minutes blacklist
 
+function loadTestTimes() {
+  try {
+    if (!fs.existsSync(TEST_TIMES_FILE_PATH)) return {};
+    const parsed = JSON.parse(fs.readFileSync(TEST_TIMES_FILE_PATH, 'utf8'));
+    if (!parsed || typeof parsed !== 'object') return {};
+    return parsed;
+  } catch (err) {
+    console.error('Failed to load test times:', err);
+    return {};
+  }
+}
+
+function saveTestTimes() {
+  try {
+    fs.writeFileSync(TEST_TIMES_FILE_PATH, JSON.stringify(testTimes, null, 2));
+  } catch (err) {
+    console.error('Failed to save test times:', err);
+  }
+}
+
+function createTestAnnouncementEmbed({ applicantTag, applicationNumber, guildName }) {
+  return applyAcceptedGif(new EmbedBuilder()
+    .setColor(0x992d22)
+    .setTitle('🎮 Test Time / وقت الاختبار')
+    .setDescription(
+      '**EN**\n' +
+      'Your application has been accepted and you are scheduled for a test. ' +
+      'Please add the day and time that works best for you.\n\n' +
+      '**AR**\n' +
+      'تم قبول طلبك وأنت مسجل لاختبار. من فضلك أضف اليوم والوقت المناسب لك.\n\n' +
+      '**EN** — Press the button below to send your test time.\n' +
+      '**AR** — اضغط الزر بالأسفل لإرسال وقت الاختبار.'
+    )
+    .addFields(
+      { name: 'Applicant / مقدم الطلب', value: `${applicantTag || 'Unknown'}`, inline: true },
+      { name: 'Application / الطلب', value: applicationNumber ? `#${applicationNumber}` : 'N/A', inline: true },
+      { name: 'Guild / السيرفر', value: `${guildName || 'AVENGERS'}`, inline: true }
+    )
+    .setFooter({ text: 'AVENGERS' })
+    .setTimestamp());
+}
+
+function createTestTimeButtonRow({ applicantId, disabled = false }) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`test_time_add_${applicantId}`)
+      .setLabel('Add Test Time / أضف الوقت')
+      .setEmoji('🕐')
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(disabled)
+  );
+}
+
+function createTestTimeModal(applicantId) {
+  const modal = new ModalBuilder()
+    .setCustomId(`test_time_modal_${applicantId}`)
+    .setTitle('Test Time / وقت الاختبار');
+
+  const dayInput = new TextInputBuilder()
+    .setCustomId('test_day')
+    .setLabel('Day / اليوم (e.g. Friday / الجمعة)')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('Friday / الجمعة')
+    .setRequired(true);
+
+  const timeInput = new TextInputBuilder()
+    .setCustomId('test_time')
+    .setLabel('Time / الوقت (24h, e.g. 8:00 / 20:00)')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('8:00')
+    .setRequired(true);
+
+  const notesInput = new TextInputBuilder()
+    .setCustomId('test_notes')
+    .setLabel('Notes / ملاحظات')
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(dayInput),
+    new ActionRowBuilder().addComponents(timeInput),
+    new ActionRowBuilder().addComponents(notesInput)
+  );
+
+  return modal;
+}
+
+function isValidTestTime(value) {
+  const m = String(value || '').trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  return !!m;
+}
+
+function buildTestAnnouncementFields({ day, time, notes }) {
+  const fields = [
+    { name: '🗓️ Day / اليوم', value: `${day}`, inline: true },
+    { name: '🕐 Time / الوقت', value: `${time}`, inline: true }
+  ];
+  if (notes) fields.push({ name: '📝 Notes / ملاحظات', value: `${notes}`, inline: false });
+  return fields;
+}
+
+async function sendTestTimeDm({ user, applicantTag, applicationNumber, guildName, applicationMessageId, applicationsChannelId }) {
+  if (!user || !user.send) return { sent: false, reason: 'no_user' };
+  try {
+    const files = acceptedGifFiles();
+    const payload = {
+      embeds: [createTestAnnouncementEmbed({ applicantTag, applicationNumber, guildName })],
+      components: [createTestTimeButtonRow({ applicantId: user.id })]
+    };
+    if (files) payload.files = files;
+    const sent = await user.send(payload);
+
+    testTimes[user.id] = {
+      applicantId: user.id,
+      applicantTag: applicantTag || user.tag,
+      applicationNumber: applicationNumber || null,
+      guildName: guildName || null,
+      applicationMessageId: applicationMessageId || null,
+      applicationsChannelId: applicationsChannelId || null,
+      dmMessageId: sent?.id || null,
+      day: null,
+      time: null,
+      notes: null,
+      status: 'pending',
+      updatedAt: new Date().toISOString()
+    };
+    saveTestTimes();
+    return { sent: true, messageId: sent?.id || null };
+  } catch (err) {
+    const reason = err && err.code === 50007 ? 'dms_closed' : (err?.message || 'unknown_error');
+    console.error(`[TEST DM FAILED] user=${user.id} reason=${reason}`);
+    return { sent: false, reason };
+  }
+}
+
+// Adds the confirmed test time to the application embed in the applications channel.
+async function applyTestTimeToApplicationMessage({ applicantId, day, time, notes }) {
+  const record = testTimes[applicantId];
+  if (!record || !record.applicationMessageId || !record.applicationsChannelId) {
+    return { updated: false, reason: 'no_stored_message' };
+  }
+  try {
+    const channel = await client.channels.fetch(record.applicationsChannelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) return { updated: false, reason: 'channel_not_found' };
+
+    const message = await channel.messages.fetch(record.applicationMessageId).catch(() => null);
+    if (!message) return { updated: false, reason: 'message_not_found' };
+
+    const originalEmbed = message.embeds?.[0];
+    if (!originalEmbed) return { updated: false, reason: 'no_embed' };
+
+    const alreadyHasTest = originalEmbed.fields?.some(f => f.name?.includes('Day / اليوم'));
+    const newFields = [
+      ...(originalEmbed.fields || []),
+      ...buildTestAnnouncementFields({ day, time, notes })
+    ];
+
+    const newEmbed = new EmbedBuilder()
+      .setColor(originalEmbed.color || EMBED_COLOR_RED)
+      .setTitle(originalEmbed.title || 'Application')
+      .setDescription(
+        (originalEmbed.description || '') +
+        '\n\n🧪 **Test scheduled / تم تحديد موعد الاختبار**\n' +
+        `🗓️ Day / اليوم: **${day}**\n` +
+        `🕐 Time / الوقت: **${time}**` +
+        (notes ? `\n📝 Notes / ملاحظات: ${notes}` : '')
+      )
+      .setFooter({ text: originalEmbed.footer?.text || 'AVENGERS' });
+    if (alreadyHasTest) {
+      const seen = new Set();
+      for (const f of newFields) {
+        const key = f.name;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        newEmbed.addFields(f);
+      }
+    } else {
+      newEmbed.addFields(newFields);
+    }
+
+    await message.edit({ embeds: [newEmbed] });
+    return { updated: true };
+  } catch (err) {
+    console.error('[TEST APPLY EDIT FAILED]', `applicantId=${applicantId}`, err);
+    return { updated: false, reason: err?.message || 'unknown_error' };
+  }
+}
+
 function loadBlacklistedUsers() {
   try {
-    if (!fs.existsSync(BLACKLIST_FILE_PATH)) return new Map();
-    const raw = fs.readFileSync(BLACKLIST_FILE_PATH, 'utf8');
+    if (!fs.existsSync(BLACKLIST_FILE_PATH)) return new Map();    const raw = fs.readFileSync(BLACKLIST_FILE_PATH, 'utf8');
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return new Map();
     return new Map(Object.entries(parsed).map(([userId, expiry]) => [userId, Number(expiry)]));
@@ -1369,6 +1558,20 @@ client.on('interactionCreate', async interaction => {
         return await interaction.editReply(replyPayload);
       }
 
+      if (customId.startsWith('test_time_add_')) {
+        const applicantId = customId.split('_')[3];
+        if (!applicantId || !/^\d{17,19}$/.test(applicantId)) {
+          return interaction.reply({ content: '⚠️ تنسيق الزر غير صالح.', ephemeral: true });
+        }
+        if (applicantId !== interaction.user.id && !hasAdminPermissions(interaction.member)) {
+          return interaction.reply({
+            content: '🚫 هذا الزر خاص بمقدم الطلب فقط. / This button is only for the applicant.',
+            ephemeral: true
+          });
+        }
+        return interaction.showModal(createTestTimeModal(applicantId));
+      }
+
       if (customId.startsWith('move_')) {
         await interaction.deferReply({ ephemeral: true });
         const memberId = interaction.customId.split('_')[1];
@@ -1433,12 +1636,28 @@ client.on('interactionCreate', async interaction => {
           });
         }
 
+        const appNumber = extractApplicationNumberFromCustomId(customId) || extractApplicationNumberFromMessage(interaction.message);
+
+        // Announce the test by DM and ask the applicant for their day/time.
+        let testDm = { sent: false, reason: 'no_user' };
+        if (member.user) {
+          testDm = await sendTestTimeDm({
+            user: member.user,
+            applicantTag: member.user.tag,
+            applicationNumber: appNumber,
+            guildName: interaction.guild?.name,
+            applicationMessageId: interaction.message?.id || null,
+            applicationsChannelId: interaction.channel?.id || null
+          });
+        }
+        console.log('[TEST ANNOUNCE DM]', `applicantId=${member.id}`, `dmSent=${testDm.sent}`, `reason=${testDm.reason}`);
+
         await sendStaffLog({
           action: '🎧 Move For Test',
           applicantUser: member.user,
           applicantId: member.id,
           staffUser: interaction.user,
-          details: 'Moved to Test Voice',
+          details: `Moved to Test Voice${testDm.sent ? ' • test-time DM sent' : ` • test-time DM failed (${testDm.reason})`}`,
           applicationNumber: extractApplicationNumberFromCustomId(customId) || extractApplicationNumberFromMessage(interaction.message),
           logChannelId: customId.endsWith('_event') || isEventApplicationMessage(interaction.message)
             ? (EVENT_APPLICATION_LOG_CHANNEL_ID || null)
@@ -1522,6 +1741,85 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.isModalSubmit()) {
+      // Applicant confirmed their test day/time
+      if (interaction.customId.startsWith('test_time_modal_')) {
+        const applicantId = interaction.customId.split('_')[3];
+        const day = interaction.fields.getTextInputValue('test_day');
+        const time = interaction.fields.getTextInputValue('test_time');
+        const notes = (interaction.fields.getTextInputValue('test_notes') || '').trim();
+
+        if (!applicantId || !/^\d{17,19}$/.test(applicantId)) {
+          return interaction.reply({ content: '⚠️ تنسيق الطلب غير صالح.', ephemeral: true });
+        }
+
+        if (!isValidTestTime(time)) {
+          return interaction.reply({
+            content: '⚠️ الوقت غير صالح / Invalid time. Use 24h format like `8:00` or `20:00`.',
+            ephemeral: true
+          });
+        }
+
+        await interaction.deferReply({ ephemeral: true });
+
+        const record = testTimes[applicantId] || { applicantId };
+        record.day = day.trim();
+        record.time = time.trim();
+        record.notes = notes || null;
+        record.status = 'confirmed';
+        record.confirmedBy = interaction.user.id;
+        record.updatedAt = new Date().toISOString();
+        testTimes[applicantId] = record;
+        saveTestTimes();
+
+        const editResult = await applyTestTimeToApplicationMessage({
+          applicantId,
+          day: record.day,
+          time: record.time,
+          notes: record.notes
+        });
+
+        // Disable the announcement button in the DM message.
+        if (record.dmMessageId) {
+          try {
+            const dmChannel = await client.channels.fetch(interaction.user.id).catch(() => null);
+            if (dmChannel && dmChannel.isTextBased()) {
+              const dmMsg = await dmChannel.messages.fetch(record.dmMessageId).catch(() => null);
+              if (dmMsg) {
+                const confirmedEmbed = applyAcceptedGif(new EmbedBuilder()
+                  .setColor(0x00ff00)
+                  .setTitle('✅ Test time confirmed / تم تأكيد وقت الاختبار')
+                  .setDescription(
+                    '**EN**\nYour test time has been received. The staff will contact you in the server.\n\n' +
+                    '**AR**\nتم استلام وقت الاختبار الخاص بك. سيتواصل معك الإدارة داخل السيرفر.'
+                  )
+                  .addFields(buildTestAnnouncementFields({ day: record.day, time: record.time, notes: record.notes }))
+                  .setFooter({ text: 'AVENGERS' })
+                  .setTimestamp());
+                await dmMsg.edit({ embeds: [confirmedEmbed], components: [createTestTimeButtonRow({ applicantId, disabled: true })] });
+              }
+            }
+          } catch (err) {
+            console.error('[TEST DM EDIT FAILED]', `applicantId=${applicantId}`, err);
+          }
+        }
+
+        console.log('[TEST TIME SET]', `applicantId=${applicantId}`, `day=${record.day}`, `time=${record.time}`, `appEdited=${editResult.updated}`, `reason=${editResult.reason || 'none'}`);
+
+        await sendStaffLog({
+          action: '🕐 Test Time Confirmed',
+          applicantUser: { tag: record.applicantTag || applicantId, username: record.applicantTag || applicantId },
+          applicantId,
+          staffUser: interaction.user,
+          details: `Day: ${record.day} | Time: ${record.time}${record.notes ? ` | Notes: ${record.notes}` : ''}`,
+          applicationNumber: record.applicationNumber || null
+        }).catch(() => null);
+
+        return interaction.editReply({
+          content: `✅ تم تسجيل وقت الاختبار / Test time recorded: **${record.day}** at **${record.time}**${editResult.updated ? '' : '\n⚠️ Could not update the application message automatically.'}`,
+          ephemeral: true
+        });
+      }
+
       if (interaction.customId === 'apply_form' || interaction.customId === 'event_apply_form') {
         const interactionId = interaction.id || `${interaction.user.id}_${Date.now()}`;
         let embedDescription;
@@ -2223,7 +2521,8 @@ client.on('messageCreate', async message => {
         '> `Accept` — accept the application and give the AV Family role (button)\n' +
         '> `Reject` — reject the application (button)\n' +
         '> `Show Status` — show the applicant\'s online status and current voice channel (button)\n' +
-        '> `Move For Test` — move the applicant and clan leaders to the test voice room (button)'
+            '> `Move For Test` — move the applicant and clan leaders to the test voice room (button)\n' +
+            '> `Add Test Time` — DM opens a form for the applicant to set their test day and time (button in DM)'
       )
       .addFields(
         {
@@ -2243,6 +2542,7 @@ client.on('messageCreate', async message => {
           value:
             '• Clan applications and event applications are **separate** — you can apply to both.\n' +
             '• The duplicate check only blocks the *same* application being sent twice.\n' +
+            '• **Move For Test** DMs the applicant a bilingual form to set their test day/time; once sent, the application embed is updated automatically.\n' +
             '• Admin commands require **Administrator** or **Manage Server** permission.'
         }
       )
