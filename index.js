@@ -1601,6 +1601,23 @@ client.on('interactionCreate', async interaction => {
           });
         }
 
+        const appNumber = extractApplicationNumberFromCustomId(customId) || extractApplicationNumberFromMessage(interaction.message);
+
+        // Announce the test by DM and ask the applicant for their day/time.
+        // This runs before the voice move so a failed move cannot suppress it.
+        let testDm = { sent: false, reason: 'no_user' };
+        if (member.user) {
+          testDm = await sendTestTimeDm({
+            user: member.user,
+            applicantTag: member.user.tag,
+            applicationNumber: appNumber,
+            guildName: interaction.guild?.name,
+            applicationMessageId: interaction.message?.id || null,
+            applicationsChannelId: interaction.channel?.id || null
+          });
+        }
+        console.log('[TEST ANNOUNCE DM]', `applicantId=${member.id}`, `dmSent=${testDm.sent}`, `reason=${testDm.reason}`);
+
         // Move applicant first
         const moved = [];
         try {
@@ -1629,28 +1646,16 @@ client.on('interactionCreate', async interaction => {
           }
         }
 
+        const dmNote = testDm.sent
+          ? ' ✅ Test-time DM sent to the applicant.'
+          : ` ❌ Test-time DM failed (${testDm.reason}).`;
+
         if (moved.length === 0) {
           return interaction.editReply({
-            content: '⚠️ لم يتم سحب أي مستخدم، ربما لا يوجد قائد كلان في فويس',
+            content: `⚠️ لم يتم سحب أي مستخدم، ربما لا يوجد قائد كلان في فويس${dmNote}`,
             ephemeral: true
           });
         }
-
-        const appNumber = extractApplicationNumberFromCustomId(customId) || extractApplicationNumberFromMessage(interaction.message);
-
-        // Announce the test by DM and ask the applicant for their day/time.
-        let testDm = { sent: false, reason: 'no_user' };
-        if (member.user) {
-          testDm = await sendTestTimeDm({
-            user: member.user,
-            applicantTag: member.user.tag,
-            applicationNumber: appNumber,
-            guildName: interaction.guild?.name,
-            applicationMessageId: interaction.message?.id || null,
-            applicationsChannelId: interaction.channel?.id || null
-          });
-        }
-        console.log('[TEST ANNOUNCE DM]', `applicantId=${member.id}`, `dmSent=${testDm.sent}`, `reason=${testDm.reason}`);
 
         await sendStaffLog({
           action: '🎧 Move For Test',
@@ -1665,7 +1670,7 @@ client.on('interactionCreate', async interaction => {
         }).catch(() => null);
 
         return interaction.editReply({
-          content: `✅ تم سحب المستخدمين إلى روم الاختبار: ${moved.join(', ')}`,
+          content: `✅ تم سحب المستخدمين إلى روم الاختبار: ${moved.join(', ')}${dmNote}`,
           ephemeral: true
         });
       }
@@ -2481,6 +2486,74 @@ client.on('messageCreate', async message => {
     return message.reply(`✅ Removed ${totalRemoved} duplicate apply message(s).`);
   }
 
+  // Staff command to send the bilingual test-time form by DM without moving anyone.
+  const testTimeCmd = content.match(/^[!&]\s*test\s*time\s*(.*)$/i);
+  if (testTimeCmd) {
+    if (!requireAdminPermission(message)) return;
+
+    const parts = (testTimeCmd[1] || '').split(/\s+/).filter(Boolean);
+    if (parts.length < 1) {
+      return message.reply('❌ استخدم: `!testtime <userid>`, `!testtime view <userid>`, `!testtime clear <userid>`');
+    }
+
+    const sub = (parts[0] || '').toLowerCase();
+    const rawTarget = sub === 'view' || sub === 'clear' ? parts[1] : parts[0];
+    const targetId = (rawTarget || '').replace(/[<@!>]/g, '');
+
+    if (sub === 'view') {
+      if (!/^\d{17,19}$/.test(targetId)) return message.reply('❌ الرجاء إدخال معرف مستخدم صالح.');
+      const record = testTimes[targetId];
+      if (!record) return message.reply(`ℹ️ لا يوجد وقت اختبار مسجل لـ <@${targetId}>.`);
+      const embed = applyAcceptedGif(new EmbedBuilder()
+        .setColor(record.status === 'confirmed' ? 0x00ff00 : 0x992d22)
+        .setTitle('🕐 Test Time / وقت الاختبار')
+        .setDescription(
+          record.status === 'confirmed'
+            ? '✅ Confirmed / تم التأكيد'
+            : '⏳ Pending — waiting for the applicant / في الانتظار من مقدم الطلب'
+        )
+        .addFields(
+          { name: 'Applicant', value: `${record.applicantTag || targetId}`, inline: true },
+          { name: 'Application', value: record.applicationNumber ? `#${record.applicationNumber}` : 'N/A', inline: true },
+          { name: 'Day / اليوم', value: record.day || '—', inline: true },
+          { name: 'Time / الوقت', value: record.time || '—', inline: true }
+        )
+        .setFooter({ text: `Updated: ${record.updatedAt || 'n/a'}` }));
+      return message.reply(withStandardGif({ embeds: [embed] }));
+    }
+
+    if (sub === 'clear') {
+      if (!/^\d{17,19}$/.test(targetId)) return message.reply('❌ الرجاء إدخال معرف مستخدم صالح.');
+      if (!testTimes[targetId]) return message.reply(`ℹ️ لا يوجد وقت اختبار مسجل لـ <@${targetId}>.`);
+      delete testTimes[targetId];
+      saveTestTimes();
+      return message.reply(`✅ تم مسح وقت الاختبار لـ <@${targetId}>.`);
+    }
+
+    if (!/^\d{17,19}$/.test(targetId)) return message.reply('❌ الرجاء إدخال معرف مستخدم صالح.');
+    const targetUser = await client.users.fetch(targetId).catch(() => null);
+    if (!targetUser) return message.reply('❌ لم يتم العثور على المستخدم.');
+
+    const targetMember = await message.guild?.members.fetch(targetId).catch(() => null);
+    const result = await sendTestTimeDm({
+      user: targetUser,
+      applicantTag: targetUser.tag,
+      applicationNumber: null,
+      guildName: message.guild?.name,
+      applicationMessageId: null,
+      applicationsChannelId: null
+    });
+
+    if (result.sent) {
+      const dmUrl = targetMember ? ` — <@${targetId}>` : '';
+      return message.reply(`✅ تم إرسال نموذج وقت الاختبار إلى <@${targetId}> عبر DM${dmUrl}.`);
+    }
+    if (result.reason === 'dms_closed') {
+      return message.reply('🚫 المستخدم مغلق الرسائل الخاصة (DM). لا يمكن إرساله له.');
+    }
+    return message.reply(`❌ فشل إرسال الرسالة: ${result.reason}`);
+  }
+
   // Admin command to post the apply message into the current channel
   if (content === '!postapply') {
     // require ManageGuild permission
@@ -2521,8 +2594,10 @@ client.on('messageCreate', async message => {
         '> `Accept` — accept the application and give the AV Family role (button)\n' +
         '> `Reject` — reject the application (button)\n' +
         '> `Show Status` — show the applicant\'s online status and current voice channel (button)\n' +
-            '> `Move For Test` — move the applicant and clan leaders to the test voice room (button)\n' +
-            '> `Add Test Time` — DM opens a form for the applicant to set their test day and time (button in DM)'
+            '> `Move For Test` — move the applicant and clan leaders to the test voice room, and DM the applicant a test-time form (button)\n' +
+            '> `!testtime <userid>` — DM the applicant a bilingual test-time form\n' +
+            '> `!testtime view <userid>` — show a user\'s recorded test day/time\n' +
+            '> `!testtime clear <userid>` — clear a user\'s test time record'
       )
       .addFields(
         {
@@ -2535,6 +2610,9 @@ client.on('messageCreate', async message => {
             '> `!blacklist <userid>` — block a user from applying permanently\n' +
             '> `!unblacklist <userid>` — lift a temporary apply block\n' +
             '> `!unblacklist <userid> dm` — resend the acceptance DM to a user\n' +
+            '> `!testtime <userid>` — DM a user the bilingual test-time form\n' +
+            '> `!testtime view <userid>` — show a recorded test day/time\n' +
+            '> `!testtime clear <userid>` — clear a recorded test time\n' +
             '> `&apply <userid>` — lift a temporary apply block for a user'
         },
         {
