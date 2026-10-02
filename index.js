@@ -289,6 +289,88 @@ function createTestTimeModal(applicantId) {
   return modal;
 }
 
+function isApplicationEmbedMessage(msg) {
+  const embed = msg?.embeds?.[0];
+  if (!embed) return false;
+  if (!(embed.footer?.text || '').match(/(\d{17,19})/)) return false;
+  return /application\s*#\d+/i.test(embed.title || '');
+}
+
+// Adds the standalone Test Time button to existing application messages that lack it.
+async function backfillTestTimeButtons(channel, log = console.log) {
+  if (!channel || !channel.isTextBased()) return { updated: 0, scanned: 0 };
+  const messages = await fetchChannelMessages(channel, 500);
+  let updated = 0;
+  let scanned = 0;
+
+  for (const msg of messages.values()) {
+    if (msg.author?.id !== client.user.id) continue;
+    if (!isApplicationEmbedMessage(msg)) continue;
+    scanned += 1;
+
+    const embed = msg.embeds[0];
+    const applicantId = (embed.footer?.text || '').match(/(\d{17,19})/)?.[1];
+    if (!applicantId) continue;
+
+    const appNumber = extractApplicationNumberFromMessage(msg);
+    if (!Number.isFinite(appNumber)) continue;
+
+    const isEvent = isEventApplicationEmbed(embed);
+    const components = (msg.components || []).map(r => ({
+      type: r.type,
+      components: r.components.map(c => ({
+        type: c.type,
+        custom_id: c.customId,
+        style: c.style,
+        label: c.label,
+        emoji: c.emoji,
+        disabled: !!c.disabled
+      }))
+    }));
+
+    const flatIds = components.flatMap(r => r.components.map(c => c.custom_id));
+    if (flatIds.some(id => id.startsWith('testtime_') || id.startsWith('test_time_add_'))) {
+      continue;
+    }
+
+    // Preserve existing buttons, drop the stale Move For Test id, append Test Time.
+    const existing = components.flatMap(r => r.components)
+      .filter(c => !c.custom_id.startsWith('move_'))
+      .map(c => ({
+        type: 2,
+        custom_id: c.custom_id.startsWith('status_') ? `status_${applicantId}_${appNumber}` : c.custom_id,
+        style: c.style ?? 2,
+        label: c.label ?? undefined,
+        emoji: c.emoji ?? undefined,
+        disabled: !!c.disabled
+      }));
+
+    existing.push({
+      type: 2,
+      custom_id: `testtime_${applicantId}_${appNumber}${isEvent ? '_event' : ''}`,
+      style: 2,
+      label: '🕐 Test Time',
+      disabled: false
+    });
+
+    // Split into rows of 5.
+    const rows = [];
+    for (let i = 0; i < existing.length; i += 5) {
+      rows.push({ type: 1, components: existing.slice(i, i + 5) });
+    }
+
+    try {
+      await msg.edit({ components: rows });
+      updated += 1;
+      log(`[BACKFILL] added Test Time to ${channel.id}/${msg.id} applicant=${applicantId} app=${appNumber}`);
+    } catch (err) {
+      console.error(`[BACKFILL FAILED] ${msg.id}`, err?.message || err);
+    }
+  }
+
+  return { updated, scanned };
+}
+
 function isValidTestTime(value) {
   const m = String(value || '').trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
   return !!m;
@@ -382,7 +464,24 @@ async function applyTestTimeToApplicationMessage({ applicantId, day, time, notes
       newEmbed.addFields(newFields);
     }
 
-    await message.edit({ embeds: [newEmbed] });
+    // Once a time is set, drop the Test Time button so it cannot be re-sent.
+    const newComponents = (message.components || [])
+      .map(r => ({
+        type: r.type,
+        components: r.components
+          .filter(c => !c.customId.startsWith('testtime_') && !c.customId.startsWith('test_time_add_'))
+          .map(c => ({
+            type: c.type,
+            custom_id: c.customId,
+            style: c.style,
+            label: c.label,
+            emoji: c.emoji,
+            disabled: !!c.disabled
+          }))
+      }))
+      .filter(r => r.components.length);
+
+    await message.edit({ embeds: [newEmbed], components: newComponents });
     return { updated: true };
   } catch (err) {
     console.error('[TEST APPLY EDIT FAILED]', `applicantId=${applicantId}`, err);
@@ -1446,9 +1545,24 @@ client.on('interactionCreate', async interaction => {
           ? '✅ تم قبولك في الكلان، أهلاً بك في العائلة 🎉'
           : `⚠️ تم قبول الطلب ولكن حدث خطأ عند إعطاء رتبة AV Family: ${roleAssignError}`;
 
+        // Keep the Test Time button so staff can still request a test time after accepting.
+        const appNumForRow = extractApplicationNumberFromCustomId(customId) || extractApplicationNumberFromMessage(interaction.message);
+        const testTimeId = applicantId && Number.isFinite(appNumForRow)
+          ? `testtime_${applicantId}_${appNumForRow}${isEventApplicationMessage(interaction.message) ? '_event' : ''}`
+          : null;
+        const alreadyHasTestTime = appNumForRow != null && testTimes[applicantId]?.status === 'confirmed';
+
         await interaction.update({
           content: updateContent,
-          components: []
+          components: testTimeId && !alreadyHasTestTime
+            ? [new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setCustomId(testTimeId)
+                .setLabel('🕐 Test Time')
+                .setEmoji('🕐')
+                .setStyle(ButtonStyle.Secondary)
+            )]
+            : []
         });
 
         applicantTag = applicantMember?.user?.tag || applicantTag;
@@ -1556,6 +1670,51 @@ client.on('interactionCreate', async interaction => {
         }
 
         return await interaction.editReply(replyPayload);
+      }
+
+      // Staff presses "Test Time" on an application: DM the applicant the bilingual form.
+      if (customId.startsWith('testtime_')) {
+        if (!hasAdminPermissions(interaction.member)) {
+          return interaction.reply({
+            content: '🚫 هذا الأمر للstaff فقط / Staff only.',
+            ephemeral: true
+          });
+        }
+        await interaction.deferReply({ ephemeral: true });
+
+        const applicantId = customId.split('_')[1];
+        const member = /^\d{17,19}$/.test(applicantId)
+          ? await interaction.guild.members.fetch(applicantId).catch(() => null)
+          : null;
+        if (!member) {
+          return interaction.editReply({ content: '❌ لم يتم العثور على العضو في السيرفر.', ephemeral: true });
+        }
+
+        const appNumber = extractApplicationNumberFromCustomId(customId) || extractApplicationNumberFromMessage(interaction.message);
+        const result = await sendTestTimeDm({
+          user: member.user,
+          applicantTag: member.user.tag,
+          applicationNumber: appNumber,
+          guildName: interaction.guild?.name,
+          applicationMessageId: interaction.message?.id || null,
+          applicationsChannelId: interaction.channel?.id || null
+        });
+
+        console.log('[TESTTIME BTN]', `applicantId=${applicantId}`, `appNumber=${appNumber || 'none'}`, `sent=${result.sent}`, `reason=${result.reason}`);
+
+        if (result.sent) {
+          return interaction.editReply({
+            content: `✅ تم إرسال نموذج وقت الاختبار إلى <@${applicantId}> عبر DM.`,
+            ephemeral: true
+          });
+        }
+        if (result.reason === 'dms_closed') {
+          return interaction.editReply({
+            content: '🚫 المستخدم مغلق الرسائل الخاصة (DM). لا يمكن إرساله له.',
+            ephemeral: true
+          });
+        }
+        return interaction.editReply({ content: `❌ فشل إرسال الرسالة: ${result.reason}`, ephemeral: true });
       }
 
       if (customId.startsWith('test_time_add_')) {
@@ -1909,9 +2068,13 @@ client.on('interactionCreate', async interaction => {
             .setLabel('Show Status')
             .setStyle(ButtonStyle.Secondary),
           new ButtonBuilder()
-            .setCustomId(`move_${interaction.user.id}_${applicationNumber}`)
+            .setCustomId(`move_${interaction.user.id}_${applicationNumber}${isEventForm ? '_event' : ''}`)
             .setLabel('Move For Test')
-            .setStyle(ButtonStyle.Primary)
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId(`testtime_${interaction.user.id}_${applicationNumber}${isEventForm ? '_event' : ''}`)
+            .setLabel('🕐 Test Time')
+            .setStyle(ButtonStyle.Secondary)
         );
 
         const desiredChannelId = isEventForm ? EVENT_APPLICATIONS_CHANNEL_ID : APPLICATIONS_CHANNEL_ID;
@@ -2486,6 +2649,32 @@ client.on('messageCreate', async message => {
     return message.reply(`✅ Removed ${totalRemoved} duplicate apply message(s).`);
   }
 
+  // Add the standalone Test Time button to existing applications.
+  if (content.toLowerCase() === '!addtesttime') {
+    if (!requireAdminPermission(message)) return;
+
+    const channelIds = [...new Set([
+      APPLICATIONS_CHANNEL_ID,
+      EVENT_APPLICATIONS_CHANNEL_ID,
+      APPLY_MESSAGE_CHANNEL_ID,
+      message.channel?.id
+    ].filter(Boolean))];
+
+    let totalUpdated = 0;
+    let totalScanned = 0;
+    for (const channelId of channelIds) {
+      const ch = channelId === message.channel?.id
+        ? message.channel
+        : await client.channels.fetch(channelId).catch(() => null);
+      if (!ch || !ch.isTextBased()) continue;
+      const res = await backfillTestTimeButtons(ch);
+      totalUpdated += res.updated;
+      totalScanned += res.scanned;
+    }
+
+    return message.reply(`✅ تمت إضافة زر **Test Time** إلى ${totalUpdated} طلب من أصل ${totalScanned}.`);
+  }
+
   // Staff command to send the bilingual test-time form by DM without moving anyone.
   const testTimeCmd = content.match(/^[!&]\s*test\s*time\s*(.*)$/i);
   if (testTimeCmd) {
@@ -2595,6 +2784,7 @@ client.on('messageCreate', async message => {
         '> `Reject` — reject the application (button)\n' +
         '> `Show Status` — show the applicant\'s online status and current voice channel (button)\n' +
             '> `Move For Test` — move the applicant and clan leaders to the test voice room, and DM the applicant a test-time form (button)\n' +
+            '> `🕐 Test Time` — DM the applicant the bilingual test-time form without moving anyone (button)\n' +
             '> `!testtime <userid>` — DM the applicant a bilingual test-time form\n' +
             '> `!testtime view <userid>` — show a user\'s recorded test day/time\n' +
             '> `!testtime clear <userid>` — clear a user\'s test time record'
@@ -2607,6 +2797,7 @@ client.on('messageCreate', async message => {
             '> `!clear applications` — delete all bot applications in the applications channel\n' +
             '> `!clear apply log` — delete all application log messages\n' +
             '> `!dedupeapply` — remove duplicate apply panels\n' +
+            '> `!addtesttime` — add the Test Time button to existing applications\n' +
             '> `!blacklist <userid>` — block a user from applying permanently\n' +
             '> `!unblacklist <userid>` — lift a temporary apply block\n' +
             '> `!unblacklist <userid> dm` — resend the acceptance DM to a user\n' +
